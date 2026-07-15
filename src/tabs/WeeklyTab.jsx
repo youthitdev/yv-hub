@@ -102,22 +102,34 @@ export default function WeeklyTab() {
     return map;
   }, [events]);
 
+  // 캘린더가 2개 이상 연동돼 있을 때만 일정 앞에 출처 색점을 표시 (하나뿐이면 기존처럼 심플하게)
+  const hasMultipleCalendars = useMemo(
+    () => new Set(events.map((ev) => ev.calendar).filter(Boolean)).size > 1,
+    [events]
+  );
+
   // ----- 담당자별 체크리스트 -----
   const [tasks, setTasks] = useState([]);
   const [taskLoading, setTaskLoading] = useState(true);
   const [taskError, setTaskError] = useState("");
   const [assigneeFilter, setAssigneeFilter] = useState("전체");
 
-  // ----- 담당자 이모지 (직접 고를 수 있도록) -----
+  // ----- 담당자 이모지 + 순서 (직접 고르고, 드래그로 재배열) -----
   const [assigneeEmojis, setAssigneeEmojis] = useState({}); // { [assignee]: "🐱" }
+  const [assigneeOrder, setAssigneeOrder] = useState({}); // { [assignee]: 0, 1, 2, ... }
   const [emojiPickerFor, setEmojiPickerFor] = useState(null); // 팝오버가 열려있는 담당자 이름
 
   const loadAssigneeEmojis = useCallback(async () => {
     const { data, error } = await supabase.from(ASSIGNEE_EMOJI_TABLE).select("*");
     if (!error && data) {
-      const map = {};
-      for (const row of data) map[row.assignee] = row.emoji;
-      setAssigneeEmojis(map);
+      const emojiMap = {};
+      const orderMap = {};
+      for (const row of data) {
+        emojiMap[row.assignee] = row.emoji;
+        if (row.sort_order != null) orderMap[row.assignee] = row.sort_order;
+      }
+      setAssigneeEmojis(emojiMap);
+      setAssigneeOrder(orderMap);
     }
   }, []);
 
@@ -151,6 +163,52 @@ export default function WeeklyTab() {
     document.addEventListener("mousedown", handleOutside);
     return () => document.removeEventListener("mousedown", handleOutside);
   }, [emojiPickerFor]);
+
+  // ----- 담당자 섹션 드래그 순서 변경 -----
+  const [dragAssignee, setDragAssignee] = useState(null);
+  const [dragOverAssignee, setDragOverAssignee] = useState(null);
+  const canReorderAssignees = assigneeFilter === "전체"; // 필터링 중엔 순서가 섞여 보여서 드래그 비활성화
+
+  const persistAssigneeOrder = useCallback(async (orderedNames) => {
+    setAssigneeOrder((prev) => {
+      const next = { ...prev };
+      orderedNames.forEach((name, idx) => { next[name] = idx; });
+      return next;
+    });
+    await Promise.all(
+      orderedNames.map((name, idx) =>
+        supabase.from(ASSIGNEE_EMOJI_TABLE).upsert({ assignee: name, sort_order: idx }, { onConflict: "assignee" })
+      )
+    );
+  }, []);
+
+  const handleAssigneeDragStart = (name) => () => {
+    if (!canReorderAssignees) return;
+    setDragAssignee(name);
+  };
+  const handleAssigneeDragOver = (name) => (e) => {
+    if (!canReorderAssignees || !dragAssignee || dragAssignee === name) return;
+    e.preventDefault();
+    setDragOverAssignee(name);
+  };
+  const handleAssigneeDrop = (orderedNames) => (name) => (e) => {
+    if (!canReorderAssignees || !dragAssignee || dragAssignee === name) return;
+    e.preventDefault();
+    const current = [...orderedNames];
+    const fromIdx = current.indexOf(dragAssignee);
+    const toIdx = current.indexOf(name);
+    if (fromIdx === -1 || toIdx === -1) return;
+    current.splice(fromIdx, 1);
+    current.splice(toIdx, 0, dragAssignee);
+    persistAssigneeOrder(current);
+    setDragAssignee(null);
+    setDragOverAssignee(null);
+  };
+  const handleAssigneeDragEnd = () => {
+    setDragAssignee(null);
+    setDragOverAssignee(null);
+  };
+
 
   const loadTasks = useCallback(async () => {
     setTaskLoading(true);
@@ -188,6 +246,19 @@ export default function WeeklyTab() {
     }
     return map;
   }, [tasks, assigneeFilter]);
+
+  // 저장된 순서(assigneeOrder)대로 정렬, 아직 순서가 없는 담당자는 이름순으로 뒤에 붙임
+  const orderedAssigneeNames = useMemo(() => {
+    const names = Object.keys(tasksByAssignee);
+    return names.sort((a, b) => {
+      const oa = assigneeOrder[a];
+      const ob = assigneeOrder[b];
+      if (oa == null && ob == null) return a.localeCompare(b, "ko");
+      if (oa == null) return 1;
+      if (ob == null) return -1;
+      return oa - ob;
+    });
+  }, [tasksByAssignee, assigneeOrder]);
 
   const toggleDone = async (task) => {
     setTasks((prev) => prev.map((t) => (t.id === task.id ? { ...t, done: !t.done } : t)));
@@ -373,9 +444,19 @@ export default function WeeklyTab() {
                       {day.getMonth() + 1}/{day.getDate()} ({WEEKDAY_LABELS[day.getDay() === 0 ? 6 : day.getDay() - 1]})
                     </div>
                     {dayEvents.map((ev, i) => (
-                      <div key={i} style={{ fontSize: 13, padding: "4px 0", color: "#2d3436" }}>
-                        • {ev.title}
-                        {!ev.allDay && <span style={{ color: "#888" }}> ({formatTime(ev.start)}~{formatTime(ev.end)})</span>}
+                      <div key={i} style={{ fontSize: 13, padding: "4px 0", color: "#2d3436", display: "flex", alignItems: "flex-start", gap: 6 }}>
+                        {hasMultipleCalendars ? (
+                          <span
+                            title={ev.calendar || ""}
+                            style={{ display: "inline-block", width: 7, height: 7, borderRadius: "50%", background: ev.color || "#00b894", marginTop: 5, flexShrink: 0 }}
+                          />
+                        ) : (
+                          <span>•</span>
+                        )}
+                        <span>
+                          {ev.title}
+                          {!ev.allDay && <span style={{ color: "#888" }}> ({formatTime(ev.start)}~{formatTime(ev.end)})</span>}
+                        </span>
                       </div>
                     ))}
                   </div>
@@ -385,8 +466,8 @@ export default function WeeklyTab() {
         </div>
 
         {/* 담당자별 체크리스트 (수동) */}
-        <div style={{ background: "white", borderRadius: 10, border: "1px solid #eee", overflow: "hidden" }}>
-          <div style={{ padding: "12px 16px", borderBottom: "1px solid #eee", display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 8 }}>
+        <div style={{ background: "white", borderRadius: 10, border: "1px solid #eee" }}>
+          <div style={{ padding: "12px 16px", borderBottom: "1px solid #eee", display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 8, borderTopLeftRadius: 10, borderTopRightRadius: 10 }}>
             <span style={{ fontWeight: 700, fontSize: 14 }}>✅ 담당자별 체크리스트</span>
             <select
               value={assigneeFilter}
@@ -400,17 +481,40 @@ export default function WeeklyTab() {
             </select>
           </div>
 
-          <div style={{ padding: 16 }}>
+          <div style={{ padding: 16, borderBottomLeftRadius: 10, borderBottomRightRadius: 10 }}>
             {taskLoading && <div style={{ color: "#999", fontSize: 13 }}>불러오는 중...</div>}
             {taskError && <div style={{ color: "#e17055", fontSize: 13 }}>{taskError}</div>}
             {!taskLoading && !taskError && Object.keys(tasksByAssignee).length === 0 && (
               <div style={{ color: "#999", fontSize: 13, marginBottom: 12 }}>등록된 할 일이 없어요.</div>
             )}
 
-            {Object.entries(tasksByAssignee).map(([assignee, list]) => (
-              <div key={assignee} style={{ marginBottom: 14, border: "1px solid #eee", borderRadius: 8 }}>
+            {orderedAssigneeNames.map((assignee) => {
+              const list = tasksByAssignee[assignee];
+              return (
+              <div
+                key={assignee}
+                draggable={canReorderAssignees}
+                onDragStart={handleAssigneeDragStart(assignee)}
+                onDragOver={handleAssigneeDragOver(assignee)}
+                onDrop={handleAssigneeDrop(orderedAssigneeNames)(assignee)}
+                onDragEnd={handleAssigneeDragEnd}
+                style={{
+                  marginBottom: 14,
+                  border: dragOverAssignee === assignee ? "1px dashed #00b894" : "1px solid #eee",
+                  borderRadius: 8,
+                  opacity: dragAssignee === assignee ? 0.5 : 1,
+                }}
+              >
                 <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "8px 12px", background: "#f8f9fa", borderBottom: "1px solid #eee", borderTopLeftRadius: 8, borderTopRightRadius: 8 }}>
                   <div style={{ position: "relative", display: "flex", alignItems: "center", gap: 4 }}>
+                    {canReorderAssignees && (
+                      <span
+                        title="드래그해서 순서 바꾸기"
+                        style={{ cursor: "grab", color: "#b2bec3", fontSize: 13, padding: "0 2px", userSelect: "none" }}
+                      >
+                        ⠿
+                      </span>
+                    )}
                     <button
                       type="button"
                       onClick={() => setEmojiPickerFor((cur) => (cur === assignee ? null : assignee))}
@@ -508,7 +612,7 @@ export default function WeeklyTab() {
                   </div>
                 </div>
               </div>
-            ))}
+            );})}
 
             {quickAddError && <div style={{ color: "#e17055", fontSize: 12, marginBottom: 8 }}>{quickAddError}</div>}
 
