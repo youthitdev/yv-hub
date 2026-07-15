@@ -54,6 +54,11 @@ function formatTime(iso) {
   return d.toLocaleTimeString("ko-KR", { hour: "2-digit", minute: "2-digit", hour12: false, timeZone: "Asia/Seoul" });
 }
 
+const VACATION_COLOR = "#ffc107";
+function isVacationEvent(ev) {
+  return /\[휴가\]/.test(ev.title || "");
+}
+
 // ---------- 컴포넌트 ----------
 
 export default function WeeklyTab() {
@@ -65,6 +70,7 @@ export default function WeeklyTab() {
 
   // ----- 캘린더 일정 -----
   const [events, setEvents] = useState([]);
+  const [calendarsConfigured, setCalendarsConfigured] = useState([]); // [{label, color}] — 이번주 이벤트 유무와 무관하게 "연결된 캘린더 개수" 자체
   const [calLoading, setCalLoading] = useState(true);
   const [calError, setCalError] = useState("");
   const [calWarning, setCalWarning] = useState("");
@@ -79,6 +85,7 @@ export default function WeeklyTab() {
       const data = await r.json();
       if (!r.ok) throw new Error(data.error || "캘린더를 불러오지 못했어요.");
       setEvents(data.events || []);
+      setCalendarsConfigured(data.calendars || []);
       if (data.warning) setCalWarning(data.warning);
     } catch (e) {
       setCalError(e.message || "캘린더를 불러오지 못했어요.");
@@ -102,11 +109,8 @@ export default function WeeklyTab() {
     return map;
   }, [events]);
 
-  // 캘린더가 2개 이상 연동돼 있을 때만 일정 앞에 출처 색점을 표시 (하나뿐이면 기존처럼 심플하게)
-  const hasMultipleCalendars = useMemo(
-    () => new Set(events.map((ev) => ev.calendar).filter(Boolean)).size > 1,
-    [events]
-  );
+  // 캘린더가 2개 이상 "연결"돼 있으면 항상 색점 표시 (이번주에 실제로 여러 곳 일정이 섞였는지와 무관하게 일관되게)
+  const hasMultipleCalendars = calendarsConfigured.length > 1;
 
   // ----- 담당자별 체크리스트 -----
   const [tasks, setTasks] = useState([]);
@@ -443,12 +447,16 @@ export default function WeeklyTab() {
                     <div style={{ fontSize: 12, fontWeight: 700, color: "#636e72", marginBottom: 4 }}>
                       {day.getMonth() + 1}/{day.getDate()} ({WEEKDAY_LABELS[day.getDay() === 0 ? 6 : day.getDay() - 1]})
                     </div>
-                    {dayEvents.map((ev, i) => (
+                    {dayEvents.map((ev, i) => {
+                      const vacation = isVacationEvent(ev);
+                      const showDot = hasMultipleCalendars || vacation;
+                      const dotColor = vacation ? VACATION_COLOR : (ev.color || "#00b894");
+                      return (
                       <div key={i} style={{ fontSize: 13, padding: "4px 0", color: "#2d3436", display: "flex", alignItems: "flex-start", gap: 6 }}>
-                        {hasMultipleCalendars ? (
+                        {showDot ? (
                           <span
                             title={ev.calendar || ""}
-                            style={{ display: "inline-block", width: 7, height: 7, borderRadius: "50%", background: ev.color || "#00b894", marginTop: 5, flexShrink: 0 }}
+                            style={{ display: "inline-block", width: 7, height: 7, borderRadius: "50%", background: dotColor, marginTop: 5, flexShrink: 0 }}
                           />
                         ) : (
                           <span>•</span>
@@ -458,7 +466,8 @@ export default function WeeklyTab() {
                           {!ev.allDay && <span style={{ color: "#888" }}> ({formatTime(ev.start)}~{formatTime(ev.end)})</span>}
                         </span>
                       </div>
-                    ))}
+                      );
+                    })}
                   </div>
                 );
               })}
