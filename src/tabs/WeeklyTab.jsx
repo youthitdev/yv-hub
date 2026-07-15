@@ -154,41 +154,50 @@ export default function WeeklyTab() {
     if (error) loadTasks();
   };
 
-  // ----- 새 항목 추가 폼 -----
-  const [showAddForm, setShowAddForm] = useState(false);
-  const [newAssignee, setNewAssignee] = useState("");
-  const [newProgramTag, setNewProgramTag] = useState("");
-  const [newContent, setNewContent] = useState("");
-  const [addError, setAddError] = useState("");
+  // ----- 빠른 입력 (담당자 섹션 안에서 내용만 치고 Enter) -----
+  const [drafts, setDrafts] = useState({}); // { [assignee]: "입력중인 텍스트" }
+  const [quickAddError, setQuickAddError] = useState("");
 
-  const handleAdd = async () => {
-    if (!newAssignee.trim() || !newContent.trim()) {
-      setAddError("담당자와 내용은 꼭 입력해주세요.");
-      return;
-    }
-    const maxOrder = tasks.filter((t) => t.assignee === newAssignee.trim()).length;
+  const setDraft = (assignee, value) => {
+    setDrafts((prev) => ({ ...prev, [assignee]: value }));
+  };
+
+  const quickAdd = async (assignee, content) => {
+    const trimmed = content.trim();
+    if (!trimmed) return;
+    const maxOrder = tasks.filter((t) => t.assignee === assignee).length;
     const { data, error } = await supabase
       .from(WEEKLY_TABLE)
       .insert({
         week_start: weekKey,
-        assignee: newAssignee.trim(),
-        program_tag: newProgramTag.trim() || null,
-        content: newContent.trim(),
+        assignee,
+        program_tag: null,
+        content: trimmed,
         done: false,
         sort_order: maxOrder,
       })
       .select()
       .single();
     if (error) {
-      setAddError("추가하지 못했어요. 잠시 후 다시 시도해주세요.");
+      setQuickAddError("추가하지 못했어요. 잠시 후 다시 시도해주세요.");
       return;
     }
     setTasks((prev) => [...prev, data]);
-    setNewAssignee("");
-    setNewProgramTag("");
-    setNewContent("");
-    setAddError("");
-    setShowAddForm(false);
+    setDraft(assignee, "");
+    setQuickAddError("");
+  };
+
+  // ----- 새 담당자 추가 (아직 목록에 없는 사람 처음 등록할 때만) -----
+  const [showNewAssignee, setShowNewAssignee] = useState(false);
+  const [newAssigneeName, setNewAssigneeName] = useState("");
+  const [newAssigneeContent, setNewAssigneeContent] = useState("");
+
+  const handleAddNewAssignee = async () => {
+    if (!newAssigneeName.trim() || !newAssigneeContent.trim()) return;
+    await quickAdd(newAssigneeName.trim(), newAssigneeContent.trim());
+    setNewAssigneeName("");
+    setNewAssigneeContent("");
+    setShowNewAssignee(false);
   };
 
   return (
@@ -298,9 +307,6 @@ export default function WeeklyTab() {
                         textDecoration: task.done ? "line-through" : "none",
                       }}
                     >
-                      {task.program_tag && (
-                        <span style={{ color: "#0984e3", fontWeight: 600, marginRight: 6 }}>[{task.program_tag}]</span>
-                      )}
                       {task.content}
                     </span>
                     <button
@@ -312,53 +318,64 @@ export default function WeeklyTab() {
                     </button>
                   </div>
                 ))}
+                {/* 이 담당자 밑에 바로 이어서 입력 → Enter로 즉시 등록 */}
+                <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "4px 0" }}>
+                  <span style={{ width: 16, textAlign: "center", color: "#dfe6e9", fontSize: 13 }}>＋</span>
+                  <input
+                    type="text"
+                    placeholder="할 일 입력 후 Enter"
+                    value={drafts[assignee] || ""}
+                    onChange={(e) => setDraft(assignee, e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") quickAdd(assignee, drafts[assignee] || "");
+                    }}
+                    style={{
+                      flex: 1,
+                      fontSize: 13,
+                      border: "none",
+                      outline: "none",
+                      background: "transparent",
+                      padding: "4px 0",
+                      color: "#2d3436",
+                    }}
+                  />
+                </div>
               </div>
             ))}
 
-            {showAddForm ? (
-              <div style={{ background: "#f8f9fa", borderRadius: 8, border: "1px solid #eee", padding: 12, marginTop: 8 }}>
-                <div style={{ display: "flex", gap: 8, marginBottom: 8, flexWrap: "wrap" }}>
-                  <input
-                    list="assignee-list"
-                    placeholder="담당자"
-                    value={newAssignee}
-                    onChange={(e) => setNewAssignee(e.target.value)}
-                    style={{ flex: 1, minWidth: 100, fontSize: 13, border: "1px solid #ddd", borderRadius: 6, padding: "6px 8px" }}
-                  />
-                  <datalist id="assignee-list">
-                    {assignees.map((a) => (
-                      <option key={a} value={a} />
-                    ))}
-                  </datalist>
-                  <input
-                    placeholder="프로그램 태그 (선택, 예: SMF)"
-                    value={newProgramTag}
-                    onChange={(e) => setNewProgramTag(e.target.value)}
-                    style={{ flex: 1, minWidth: 120, fontSize: 13, border: "1px solid #ddd", borderRadius: 6, padding: "6px 8px" }}
-                  />
-                </div>
+            {quickAddError && <div style={{ color: "#e17055", fontSize: 12, marginBottom: 8 }}>{quickAddError}</div>}
+
+            {/* 아직 목록에 없는 새 담당자 추가 */}
+            {showNewAssignee ? (
+              <div style={{ background: "#f8f9fa", borderRadius: 8, border: "1px solid #eee", padding: 10, marginTop: 4, display: "flex", gap: 8, flexWrap: "wrap" }}>
                 <input
-                  placeholder="할 일 내용"
-                  value={newContent}
-                  onChange={(e) => setNewContent(e.target.value)}
-                  style={{ width: "100%", fontSize: 13, border: "1px solid #ddd", borderRadius: 6, padding: "6px 8px", marginBottom: 8 }}
+                  placeholder="담당자 이름"
+                  value={newAssigneeName}
+                  onChange={(e) => setNewAssigneeName(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === "Enter") handleAddNewAssignee(); }}
+                  style={{ flex: 1, minWidth: 90, fontSize: 13, border: "1px solid #ddd", borderRadius: 6, padding: "6px 8px" }}
+                  autoFocus
                 />
-                {addError && <div style={{ color: "#e17055", fontSize: 12, marginBottom: 8 }}>{addError}</div>}
-                <div style={{ display: "flex", gap: 8 }}>
-                  <button onClick={handleAdd} style={{ background: "#00b894", border: "none", color: "white", borderRadius: 6, padding: "6px 14px", cursor: "pointer", fontSize: 13, fontWeight: 600 }}>
-                    추가
-                  </button>
-                  <button onClick={() => { setShowAddForm(false); setAddError(""); }} style={{ background: "#dfe6e9", border: "none", borderRadius: 6, padding: "6px 14px", cursor: "pointer", fontSize: 13 }}>
-                    취소
-                  </button>
-                </div>
+                <input
+                  placeholder="첫 할 일 입력 후 Enter"
+                  value={newAssigneeContent}
+                  onChange={(e) => setNewAssigneeContent(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === "Enter") handleAddNewAssignee(); }}
+                  style={{ flex: 2, minWidth: 140, fontSize: 13, border: "1px solid #ddd", borderRadius: 6, padding: "6px 8px" }}
+                />
+                <button
+                  onClick={() => { setShowNewAssignee(false); setNewAssigneeName(""); setNewAssigneeContent(""); }}
+                  style={{ background: "none", border: "none", color: "#b2bec3", cursor: "pointer", fontSize: 13 }}
+                >
+                  취소
+                </button>
               </div>
             ) : (
               <div
-                onClick={() => setShowAddForm(true)}
+                onClick={() => setShowNewAssignee(true)}
                 style={{ marginTop: 8, textAlign: "center", padding: "8px", border: "1px dashed #dfe6e9", borderRadius: 8, cursor: "pointer", color: "#636e72", fontSize: 13 }}
               >
-                ＋ 할 일 추가
+                ＋ 새 담당자 추가
               </div>
             )}
           </div>
