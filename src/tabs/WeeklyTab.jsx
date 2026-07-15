@@ -200,6 +200,73 @@ export default function WeeklyTab() {
     setShowNewAssignee(false);
   };
 
+  // ----- 지난주 항목 불러오기 -----
+  const [importing, setImporting] = useState(false);
+  const [importMsg, setImportMsg] = useState("");
+
+  const importLastWeek = async () => {
+    setImporting(true);
+    setImportMsg("");
+    const prevKey = toDateKey(addDays(weekMonday, -7));
+
+    const { data: prevTasks, error } = await supabase
+      .from(WEEKLY_TABLE)
+      .select("*")
+      .eq("week_start", prevKey)
+      .order("assignee", { ascending: true })
+      .order("sort_order", { ascending: true });
+
+    if (error) {
+      setImportMsg("지난주 항목을 불러오는 중 문제가 생겼어요.");
+      setImporting(false);
+      return;
+    }
+    if (!prevTasks || prevTasks.length === 0) {
+      setImportMsg("지난주에 등록된 항목이 없어요.");
+      setImporting(false);
+      return;
+    }
+
+    // 이번 주에 이미 같은 담당자+내용이 있으면 건너뛰어서 중복 등록 방지
+    const existingKeys = new Set(tasks.map((t) => `${t.assignee}::${t.content}`));
+    const countByAssignee = {};
+    tasks.forEach((t) => {
+      countByAssignee[t.assignee] = (countByAssignee[t.assignee] || 0) + 1;
+    });
+
+    const toInsert = [];
+    for (const t of prevTasks) {
+      const key = `${t.assignee}::${t.content}`;
+      if (existingKeys.has(key)) continue;
+      existingKeys.add(key);
+      const nextOrder = countByAssignee[t.assignee] || 0;
+      countByAssignee[t.assignee] = nextOrder + 1;
+      toInsert.push({
+        week_start: weekKey,
+        assignee: t.assignee,
+        program_tag: null,
+        content: t.content,
+        done: false,
+        sort_order: nextOrder,
+      });
+    }
+
+    if (toInsert.length === 0) {
+      setImportMsg("지난주 항목이 이미 다 반영되어 있어요.");
+      setImporting(false);
+      return;
+    }
+
+    const { data: inserted, error: insertError } = await supabase.from(WEEKLY_TABLE).insert(toInsert).select();
+    if (insertError) {
+      setImportMsg("불러오는 중 문제가 생겼어요. 잠시 후 다시 시도해주세요.");
+    } else {
+      setTasks((prev) => [...prev, ...(inserted || [])]);
+      setImportMsg(`지난주에서 ${inserted.length}개 항목을 불러왔어요.`);
+    }
+    setImporting(false);
+  };
+
   return (
     <div style={{ fontFamily: "'Apple SD Gothic Neo','Noto Sans KR',sans-serif", background: "#f5f6fa", minHeight: "100%", paddingBottom: 60 }}>
       {/* 주차 네비게이션 */}
@@ -274,17 +341,41 @@ export default function WeeklyTab() {
         <div style={{ background: "white", borderRadius: 10, border: "1px solid #eee", overflow: "hidden" }}>
           <div style={{ padding: "12px 16px", borderBottom: "1px solid #eee", display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 8 }}>
             <span style={{ fontWeight: 700, fontSize: 14 }}>✅ 담당자별 체크리스트</span>
-            <select
-              value={assigneeFilter}
-              onChange={(e) => setAssigneeFilter(e.target.value)}
-              style={{ fontSize: 12, border: "1px solid #ddd", borderRadius: 6, padding: "4px 8px" }}
-            >
-              <option value="전체">전체 보기</option>
-              {assignees.map((a) => (
-                <option key={a} value={a}>{a}</option>
-              ))}
-            </select>
+            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <button
+                onClick={importLastWeek}
+                disabled={importing}
+                style={{
+                  fontSize: 12,
+                  border: "1px solid #ddd",
+                  borderRadius: 6,
+                  padding: "4px 10px",
+                  background: "white",
+                  cursor: importing ? "default" : "pointer",
+                  color: "#2d3436",
+                  opacity: importing ? 0.6 : 1,
+                }}
+              >
+                {importing ? "불러오는 중..." : "⬅ 지난주 불러오기"}
+              </button>
+              <select
+                value={assigneeFilter}
+                onChange={(e) => setAssigneeFilter(e.target.value)}
+                style={{ fontSize: 12, border: "1px solid #ddd", borderRadius: 6, padding: "4px 8px" }}
+              >
+                <option value="전체">전체 보기</option>
+                {assignees.map((a) => (
+                  <option key={a} value={a}>{a}</option>
+                ))}
+              </select>
+            </div>
           </div>
+
+          {importMsg && (
+            <div style={{ padding: "8px 16px", fontSize: 12, color: "#636e72", background: "#f8f9fa", borderBottom: "1px solid #eee" }}>
+              {importMsg}
+            </div>
+          )}
 
           <div style={{ padding: 16 }}>
             {taskLoading && <div style={{ color: "#999", fontSize: 13 }}>불러오는 중...</div>}
@@ -327,7 +418,9 @@ export default function WeeklyTab() {
                     value={drafts[assignee] || ""}
                     onChange={(e) => setDraft(assignee, e.target.value)}
                     onKeyDown={(e) => {
-                      if (e.key === "Enter") quickAdd(assignee, drafts[assignee] || "");
+                      if (e.key !== "Enter") return;
+                      if (e.nativeEvent.isComposing || e.keyCode === 229) return; // 한글 등 IME 조합 중 Enter 중복 방지
+                      quickAdd(assignee, drafts[assignee] || "");
                     }}
                     style={{
                       flex: 1,
@@ -352,7 +445,11 @@ export default function WeeklyTab() {
                   placeholder="담당자 이름"
                   value={newAssigneeName}
                   onChange={(e) => setNewAssigneeName(e.target.value)}
-                  onKeyDown={(e) => { if (e.key === "Enter") handleAddNewAssignee(); }}
+                  onKeyDown={(e) => {
+                    if (e.key !== "Enter") return;
+                    if (e.nativeEvent.isComposing || e.keyCode === 229) return;
+                    handleAddNewAssignee();
+                  }}
                   style={{ flex: 1, minWidth: 90, fontSize: 13, border: "1px solid #ddd", borderRadius: 6, padding: "6px 8px" }}
                   autoFocus
                 />
@@ -360,7 +457,11 @@ export default function WeeklyTab() {
                   placeholder="첫 할 일 입력 후 Enter"
                   value={newAssigneeContent}
                   onChange={(e) => setNewAssigneeContent(e.target.value)}
-                  onKeyDown={(e) => { if (e.key === "Enter") handleAddNewAssignee(); }}
+                  onKeyDown={(e) => {
+                    if (e.key !== "Enter") return;
+                    if (e.nativeEvent.isComposing || e.keyCode === 229) return;
+                    handleAddNewAssignee();
+                  }}
                   style={{ flex: 2, minWidth: 140, fontSize: 13, border: "1px solid #ddd", borderRadius: 6, padding: "6px 8px" }}
                 />
                 <button
