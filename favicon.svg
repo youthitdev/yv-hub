@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+  <!-- 배경 -->
+  <rect width="32" height="32" rx="6" fill="#2d3436"/>
+  <!-- 달력 상단 빨간 바 -->
+  <rect x="4" y="4" width="24" height="8" rx="3" fill="#e17055"/>
+  <!-- 달력 몸통 -->
+  <rect x="4" y="10" width="24" height="18" rx="3" fill="white"/>
+  <!-- 고리 왼쪽 -->
+  <rect x="9" y="2" width="3" height="6" rx="1.5" fill="#636e72"/>
+  <!-- 고리 오른쪽 -->
+  <rect x="20" y="2" width="3" height="6" rx="1.5" fill="#636e72"/>
+  <!-- 날짜 점들 -->
+  <rect x="8"  y="16" width="3" height="3" rx="1" fill="#00b894"/>
+  <rect x="14" y="16" width="3" height="3" rx="1" fill="#00b894"/>
+  <rect x="20" y="16" width="3" height="3" rx="1" fill="#e67e22"/>
+  <rect x="8"  y="22" width="3" height="3" rx="1" fill="#e67e22"/>
+  <rect x="14" y="22" width="3" height="3" rx="1" fill="#2980b9"/>
+  <rect x="20" y="22" width="3" height="3" rx="1" fill="#2d3436"/>
+</svg>
