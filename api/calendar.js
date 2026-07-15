@@ -95,6 +95,7 @@ export default async function handler(req, res) {
   if (configs.length === 0) {
     res.status(200).json({
       events: [],
+      calendars: [],
       warning:
         "CALENDAR_ICS_URL 환경변수가 설정되지 않았어요. Vercel 프로젝트 설정에서 팀 캘린더의 iCal 비밀 주소를 등록해주세요.",
     });
@@ -130,5 +131,9 @@ export default async function handler(req, res) {
   const failed = results.filter((r) => !r.ok);
   const warning = failed.length > 0 ? `${failed.map((f) => f.label).join(", ")} 캘린더를 불러오지 못했어요.` : undefined;
 
-  res.status(200).json({ events, ...(warning ? { warning } : {}) });
+  res.status(200).json({
+    events,
+    calendars: configs.map((c) => ({ label: c.label, color: c.color })),
+    ...(warning ? { warning } : {}),
+  });
 }
