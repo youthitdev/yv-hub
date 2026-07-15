@@ -1,7 +1,10 @@
-import { useState, useEffect, useCallback, useMemo } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef } from "react";
+import EmojiPicker from "emoji-picker-react";
 import { supabase } from "../supabaseClient";
 
 const WEEKLY_TABLE = "weekly_tasks";
+const ASSIGNEE_EMOJI_TABLE = "assignee_emojis";
+const DEFAULT_ASSIGNEE_EMOJI = "🙋";
 
 // ---------- 날짜 헬퍼 (KST 기준) ----------
 
@@ -104,6 +107,50 @@ export default function WeeklyTab() {
   const [taskLoading, setTaskLoading] = useState(true);
   const [taskError, setTaskError] = useState("");
   const [assigneeFilter, setAssigneeFilter] = useState("전체");
+
+  // ----- 담당자 이모지 (직접 고를 수 있도록) -----
+  const [assigneeEmojis, setAssigneeEmojis] = useState({}); // { [assignee]: "🐱" }
+  const [emojiPickerFor, setEmojiPickerFor] = useState(null); // 팝오버가 열려있는 담당자 이름
+
+  const loadAssigneeEmojis = useCallback(async () => {
+    const { data, error } = await supabase.from(ASSIGNEE_EMOJI_TABLE).select("*");
+    if (!error && data) {
+      const map = {};
+      for (const row of data) map[row.assignee] = row.emoji;
+      setAssigneeEmojis(map);
+    }
+  }, []);
+
+  useEffect(() => {
+    loadAssigneeEmojis();
+  }, [loadAssigneeEmojis]);
+
+  const getAssigneeEmoji = useCallback(
+    (assignee) => assigneeEmojis[assignee] || DEFAULT_ASSIGNEE_EMOJI,
+    [assigneeEmojis]
+  );
+
+  const saveAssigneeEmoji = async (assignee, emoji) => {
+    setAssigneeEmojis((prev) => ({ ...prev, [assignee]: emoji }));
+    setEmojiPickerFor(null);
+    const { error } = await supabase
+      .from(ASSIGNEE_EMOJI_TABLE)
+      .upsert({ assignee, emoji }, { onConflict: "assignee" });
+    if (error) loadAssigneeEmojis(); // 실패하면 원래 상태로 다시 동기화
+  };
+
+  // 팝오버 바깥을 클릭하면 닫기
+  const emojiPopoverRef = useRef(null);
+  useEffect(() => {
+    if (!emojiPickerFor) return;
+    function handleOutside(e) {
+      if (emojiPopoverRef.current && !emojiPopoverRef.current.contains(e.target)) {
+        setEmojiPickerFor(null);
+      }
+    }
+    document.addEventListener("mousedown", handleOutside);
+    return () => document.removeEventListener("mousedown", handleOutside);
+  }, [emojiPickerFor]);
 
   const loadTasks = useCallback(async () => {
     setTaskLoading(true);
@@ -361,9 +408,33 @@ export default function WeeklyTab() {
             )}
 
             {Object.entries(tasksByAssignee).map(([assignee, list]) => (
-              <div key={assignee} style={{ marginBottom: 14, border: "1px solid #eee", borderRadius: 8, overflow: "hidden" }}>
-                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "8px 12px", background: "#f8f9fa", borderBottom: "1px solid #eee" }}>
-                  <span style={{ fontSize: 13, fontWeight: 700, color: "#2d3436" }}>🙋 {assignee}</span>
+              <div key={assignee} style={{ marginBottom: 14, border: "1px solid #eee", borderRadius: 8 }}>
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "8px 12px", background: "#f8f9fa", borderBottom: "1px solid #eee", borderTopLeftRadius: 8, borderTopRightRadius: 8 }}>
+                  <div style={{ position: "relative", display: "flex", alignItems: "center", gap: 4 }}>
+                    <button
+                      type="button"
+                      onClick={() => setEmojiPickerFor((cur) => (cur === assignee ? null : assignee))}
+                      title="이모지 바꾸기"
+                      style={{ background: "none", border: "none", cursor: "pointer", fontSize: 15, lineHeight: 1, padding: "2px 4px", borderRadius: 6 }}
+                    >
+                      {getAssigneeEmoji(assignee)}
+                    </button>
+                    <span style={{ fontSize: 13, fontWeight: 700, color: "#2d3436" }}>{assignee}</span>
+                    {emojiPickerFor === assignee && (
+                      <div
+                        ref={emojiPopoverRef}
+                        style={{ position: "absolute", top: "calc(100% + 6px)", left: 0, zIndex: 30, boxShadow: "0 8px 24px rgba(0,0,0,0.15)", borderRadius: 10, overflow: "hidden" }}
+                      >
+                        <EmojiPicker
+                          onEmojiClick={(emojiData) => saveAssigneeEmoji(assignee, emojiData.emoji)}
+                          width={280}
+                          height={320}
+                          skinTonesDisabled
+                          previewConfig={{ showPreview: false }}
+                        />
+                      </div>
+                    )}
+                  </div>
                   <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
                     {importNotes[assignee] && (
                       <span style={{ fontSize: 11, color: "#636e72" }}>{importNotes[assignee]}</span>
@@ -388,7 +459,7 @@ export default function WeeklyTab() {
                   </div>
                 </div>
 
-                <div style={{ padding: "6px 12px" }}>
+                <div style={{ padding: "6px 12px", borderBottomLeftRadius: 8, borderBottomRightRadius: 8 }}>
                   {list.map((task) => (
                     <div key={task.id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "4px 0" }}>
                       <input type="checkbox" checked={!!task.done} onChange={() => toggleDone(task)} />
@@ -462,7 +533,7 @@ export default function WeeklyTab() {
                         opacity: importingAssignees[a] ? 0.6 : 1,
                       }}
                     >
-                      {importingAssignees[a] ? `${a} 불러오는 중...` : `🙋 ${a} 불러오기`}
+                      {importingAssignees[a] ? `${a} 불러오는 중...` : `${getAssigneeEmoji(a)} ${a} 불러오기`}
                     </button>
                   ))}
                 </div>
