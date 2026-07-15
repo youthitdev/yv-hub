@@ -200,71 +200,71 @@ export default function WeeklyTab() {
     setShowNewAssignee(false);
   };
 
-  // ----- 지난주 항목 불러오기 -----
-  const [importing, setImporting] = useState(false);
-  const [importMsg, setImportMsg] = useState("");
+  // ----- 지난주 데이터 (담당자별 불러오기에 사용) -----
+  const prevWeekKey = useMemo(() => toDateKey(addDays(weekMonday, -7)), [weekMonday]);
+  const [prevTasks, setPrevTasks] = useState([]);
 
-  const importLastWeek = async () => {
-    setImporting(true);
-    setImportMsg("");
-    const prevKey = toDateKey(addDays(weekMonday, -7));
-
-    const { data: prevTasks, error } = await supabase
+  const loadPrevTasks = useCallback(async () => {
+    const { data, error } = await supabase
       .from(WEEKLY_TABLE)
       .select("*")
-      .eq("week_start", prevKey)
+      .eq("week_start", prevWeekKey)
       .order("assignee", { ascending: true })
       .order("sort_order", { ascending: true });
+    if (!error) setPrevTasks(data || []);
+  }, [prevWeekKey]);
 
-    if (error) {
-      setImportMsg("지난주 항목을 불러오는 중 문제가 생겼어요.");
-      setImporting(false);
-      return;
-    }
-    if (!prevTasks || prevTasks.length === 0) {
-      setImportMsg("지난주에 등록된 항목이 없어요.");
-      setImporting(false);
-      return;
-    }
+  useEffect(() => {
+    loadPrevTasks();
+  }, [loadPrevTasks]);
 
-    // 이번 주에 이미 같은 담당자+내용이 있으면 건너뛰어서 중복 등록 방지
-    const existingKeys = new Set(tasks.map((t) => `${t.assignee}::${t.content}`));
-    const countByAssignee = {};
-    tasks.forEach((t) => {
-      countByAssignee[t.assignee] = (countByAssignee[t.assignee] || 0) + 1;
-    });
+  // 지난주엔 있었지만 이번주엔 아직 섹션이 없는 담당자 (한 번도 항목을 안 만든 경우)
+  const newPrevAssignees = useMemo(() => {
+    const prevSet = new Set(prevTasks.map((t) => t.assignee).filter(Boolean));
+    return Array.from(prevSet).filter((a) => !assignees.includes(a));
+  }, [prevTasks, assignees]);
+
+  const [importingAssignees, setImportingAssignees] = useState({}); // { [assignee]: true }
+  const [importNotes, setImportNotes] = useState({}); // { [assignee]: "안내 문구" }
+
+  const importAssignee = async (assigneeName) => {
+    setImportingAssignees((prev) => ({ ...prev, [assigneeName]: true }));
+    setImportNotes((prev) => ({ ...prev, [assigneeName]: "" }));
+
+    const relevant = prevTasks.filter((t) => t.assignee === assigneeName);
+    const existingContents = new Set(tasks.filter((t) => t.assignee === assigneeName).map((t) => t.content));
+    let nextOrder = tasks.filter((t) => t.assignee === assigneeName).length;
 
     const toInsert = [];
-    for (const t of prevTasks) {
-      const key = `${t.assignee}::${t.content}`;
-      if (existingKeys.has(key)) continue;
-      existingKeys.add(key);
-      const nextOrder = countByAssignee[t.assignee] || 0;
-      countByAssignee[t.assignee] = nextOrder + 1;
+    for (const t of relevant) {
+      if (existingContents.has(t.content)) continue;
+      existingContents.add(t.content);
       toInsert.push({
         week_start: weekKey,
-        assignee: t.assignee,
+        assignee: assigneeName,
         program_tag: null,
         content: t.content,
         done: false,
-        sort_order: nextOrder,
+        sort_order: nextOrder++,
       });
     }
 
     if (toInsert.length === 0) {
-      setImportMsg("지난주 항목이 이미 다 반영되어 있어요.");
-      setImporting(false);
+      setImportingAssignees((prev) => ({ ...prev, [assigneeName]: false }));
+      setImportNotes((prev) => ({ ...prev, [assigneeName]: "가져올 새 항목이 없어요." }));
+      setTimeout(() => setImportNotes((prev) => ({ ...prev, [assigneeName]: "" })), 2000);
       return;
     }
 
-    const { data: inserted, error: insertError } = await supabase.from(WEEKLY_TABLE).insert(toInsert).select();
-    if (insertError) {
-      setImportMsg("불러오는 중 문제가 생겼어요. 잠시 후 다시 시도해주세요.");
-    } else {
-      setTasks((prev) => [...prev, ...(inserted || [])]);
-      setImportMsg(`지난주에서 ${inserted.length}개 항목을 불러왔어요.`);
+    const { data, error } = await supabase.from(WEEKLY_TABLE).insert(toInsert).select();
+    setImportingAssignees((prev) => ({ ...prev, [assigneeName]: false }));
+    if (error) {
+      setImportNotes((prev) => ({ ...prev, [assigneeName]: "불러오지 못했어요." }));
+      return;
     }
-    setImporting(false);
+    setTasks((prev) => [...prev, ...(data || [])]);
+    setImportNotes((prev) => ({ ...prev, [assigneeName]: `${data.length}개 불러옴` }));
+    setTimeout(() => setImportNotes((prev) => ({ ...prev, [assigneeName]: "" })), 2000);
   };
 
   return (
@@ -341,41 +341,17 @@ export default function WeeklyTab() {
         <div style={{ background: "white", borderRadius: 10, border: "1px solid #eee", overflow: "hidden" }}>
           <div style={{ padding: "12px 16px", borderBottom: "1px solid #eee", display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 8 }}>
             <span style={{ fontWeight: 700, fontSize: 14 }}>✅ 담당자별 체크리스트</span>
-            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-              <button
-                onClick={importLastWeek}
-                disabled={importing}
-                style={{
-                  fontSize: 12,
-                  border: "1px solid #ddd",
-                  borderRadius: 6,
-                  padding: "4px 10px",
-                  background: "white",
-                  cursor: importing ? "default" : "pointer",
-                  color: "#2d3436",
-                  opacity: importing ? 0.6 : 1,
-                }}
-              >
-                {importing ? "불러오는 중..." : "⬅ 지난주 불러오기"}
-              </button>
-              <select
-                value={assigneeFilter}
-                onChange={(e) => setAssigneeFilter(e.target.value)}
-                style={{ fontSize: 12, border: "1px solid #ddd", borderRadius: 6, padding: "4px 8px" }}
-              >
-                <option value="전체">전체 보기</option>
-                {assignees.map((a) => (
-                  <option key={a} value={a}>{a}</option>
-                ))}
-              </select>
-            </div>
+            <select
+              value={assigneeFilter}
+              onChange={(e) => setAssigneeFilter(e.target.value)}
+              style={{ fontSize: 12, border: "1px solid #ddd", borderRadius: 6, padding: "4px 8px" }}
+            >
+              <option value="전체">전체 보기</option>
+              {assignees.map((a) => (
+                <option key={a} value={a}>{a}</option>
+              ))}
+            </select>
           </div>
-
-          {importMsg && (
-            <div style={{ padding: "8px 16px", fontSize: 12, color: "#636e72", background: "#f8f9fa", borderBottom: "1px solid #eee" }}>
-              {importMsg}
-            </div>
-          )}
 
           <div style={{ padding: 16 }}>
             {taskLoading && <div style={{ color: "#999", fontSize: 13 }}>불러오는 중...</div>}
@@ -385,60 +361,113 @@ export default function WeeklyTab() {
             )}
 
             {Object.entries(tasksByAssignee).map(([assignee, list]) => (
-              <div key={assignee} style={{ marginBottom: 16 }}>
-                <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 6, color: "#2d3436" }}>🙋 {assignee}</div>
-                {list.map((task) => (
-                  <div key={task.id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "4px 0" }}>
-                    <input type="checkbox" checked={!!task.done} onChange={() => toggleDone(task)} />
-                    <span
+              <div key={assignee} style={{ marginBottom: 14, border: "1px solid #eee", borderRadius: 8, overflow: "hidden" }}>
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "8px 12px", background: "#f8f9fa", borderBottom: "1px solid #eee" }}>
+                  <span style={{ fontSize: 13, fontWeight: 700, color: "#2d3436" }}>🙋 {assignee}</span>
+                  <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                    {importNotes[assignee] && (
+                      <span style={{ fontSize: 11, color: "#636e72" }}>{importNotes[assignee]}</span>
+                    )}
+                    <button
+                      onClick={() => importAssignee(assignee)}
+                      disabled={!!importingAssignees[assignee]}
+                      title="지난주에 이 담당자 항목이 있었으면 이번 주로 복사해와요"
                       style={{
-                        fontSize: 13,
-                        flex: 1,
-                        color: task.done ? "#b2bec3" : "#2d3436",
-                        textDecoration: task.done ? "line-through" : "none",
+                        fontSize: 11,
+                        border: "1px solid #ddd",
+                        borderRadius: 6,
+                        padding: "3px 8px",
+                        background: "white",
+                        color: "#636e72",
+                        cursor: importingAssignees[assignee] ? "default" : "pointer",
+                        opacity: importingAssignees[assignee] ? 0.6 : 1,
                       }}
                     >
-                      {task.content}
-                    </span>
-                    <button
-                      onClick={() => deleteTask(task)}
-                      style={{ background: "none", border: "none", color: "#b2bec3", cursor: "pointer", fontSize: 13 }}
-                      title="삭제"
-                    >
-                      ✕
+                      {importingAssignees[assignee] ? "..." : "⬅ 지난주"}
                     </button>
                   </div>
-                ))}
-                {/* 이 담당자 밑에 바로 이어서 입력 → Enter로 즉시 등록 */}
-                <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "4px 0" }}>
-                  <span style={{ width: 16, textAlign: "center", color: "#dfe6e9", fontSize: 13 }}>＋</span>
-                  <input
-                    type="text"
-                    placeholder="할 일 입력 후 Enter"
-                    value={drafts[assignee] || ""}
-                    onChange={(e) => setDraft(assignee, e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key !== "Enter") return;
-                      if (e.nativeEvent.isComposing || e.keyCode === 229) return; // 한글 등 IME 조합 중 Enter 중복 방지
-                      quickAdd(assignee, drafts[assignee] || "");
-                    }}
-                    style={{
-                      flex: 1,
-                      fontSize: 13,
-                      border: "none",
-                      outline: "none",
-                      background: "transparent",
-                      padding: "4px 0",
-                      color: "#2d3436",
-                    }}
-                  />
+                </div>
+
+                <div style={{ padding: "6px 12px" }}>
+                  {list.map((task) => (
+                    <div key={task.id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "4px 0" }}>
+                      <input type="checkbox" checked={!!task.done} onChange={() => toggleDone(task)} />
+                      <span
+                        style={{
+                          fontSize: 13,
+                          flex: 1,
+                          color: task.done ? "#b2bec3" : "#2d3436",
+                          textDecoration: task.done ? "line-through" : "none",
+                        }}
+                      >
+                        {task.content}
+                      </span>
+                      <button
+                        onClick={() => deleteTask(task)}
+                        style={{ background: "none", border: "none", color: "#b2bec3", cursor: "pointer", fontSize: 13 }}
+                        title="삭제"
+                      >
+                        ✕
+                      </button>
+                    </div>
+                  ))}
+                  {/* 이 담당자 밑에 바로 이어서 입력 → Enter로 즉시 등록 */}
+                  <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "4px 0" }}>
+                    <span style={{ width: 16, textAlign: "center", color: "#dfe6e9", fontSize: 13 }}>＋</span>
+                    <input
+                      type="text"
+                      placeholder="할 일 입력 후 Enter"
+                      value={drafts[assignee] || ""}
+                      onChange={(e) => setDraft(assignee, e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key !== "Enter") return;
+                        if (e.nativeEvent.isComposing || e.keyCode === 229) return; // 한글 등 IME 조합 중 Enter 중복 방지
+                        quickAdd(assignee, drafts[assignee] || "");
+                      }}
+                      style={{
+                        flex: 1,
+                        fontSize: 13,
+                        border: "none",
+                        outline: "none",
+                        background: "transparent",
+                        padding: "4px 0",
+                        color: "#2d3436",
+                      }}
+                    />
+                  </div>
                 </div>
               </div>
             ))}
 
             {quickAddError && <div style={{ color: "#e17055", fontSize: 12, marginBottom: 8 }}>{quickAddError}</div>}
 
-            {/* 아직 목록에 없는 새 담당자 추가 */}
+            {/* 지난주엔 있었지만 이번주엔 아직 섹션이 없는 담당자 → 칩 클릭 한 번으로 섹션 생성 + 항목 복사 */}
+            {assigneeFilter === "전체" && newPrevAssignees.length > 0 && (
+              <div style={{ marginBottom: 12, padding: "10px 12px", border: "1px dashed #dfe6e9", borderRadius: 8 }}>
+                <div style={{ fontSize: 11, color: "#999", marginBottom: 6 }}>지난주에 있었던 담당자 (이번주엔 아직 없음)</div>
+                <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                  {newPrevAssignees.map((a) => (
+                    <button
+                      key={a}
+                      onClick={() => importAssignee(a)}
+                      disabled={!!importingAssignees[a]}
+                      style={{
+                        fontSize: 12,
+                        border: "1px solid #ddd",
+                        borderRadius: 14,
+                        padding: "4px 12px",
+                        background: "white",
+                        color: "#2d3436",
+                        cursor: importingAssignees[a] ? "default" : "pointer",
+                        opacity: importingAssignees[a] ? 0.6 : 1,
+                      }}
+                    >
+                      {importingAssignees[a] ? `${a} 불러오는 중...` : `🙋 ${a} 불러오기`}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
             {showNewAssignee ? (
               <div style={{ background: "#f8f9fa", borderRadius: 8, border: "1px solid #eee", padding: 10, marginTop: 4, display: "flex", gap: 8, flexWrap: "wrap" }}>
                 <input
