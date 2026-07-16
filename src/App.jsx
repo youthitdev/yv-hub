@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import WeeklyTab from "./tabs/WeeklyTab.jsx";
 import GanttTab from "./tabs/GanttTab.jsx";
 import TrackerTab from "./tabs/TrackerTab.jsx";
@@ -6,13 +6,25 @@ import TrackerTab from "./tabs/TrackerTab.jsx";
 const NAV_HEIGHT = 52;
 
 const TABS = [
-  { key: "weekly", label: "🍀 이번주", Component: WeeklyTab },
+  { key: "weekly", label: "🍀 주간업무", Component: WeeklyTab },
   { key: "gantt", label: "📊 사업일정", Component: GanttTab },
-  { key: "tracker", label: "📋 지원서트래커", Component: TrackerTab },
+  { key: "tracker", label: "📋 지원서현황", Component: TrackerTab },
 ];
 
+const TAB_KEYS = TABS.map((t) => t.key);
+
+function getInitialTab() {
+  const hash = window.location.hash.replace("#", "");
+  return TAB_KEYS.includes(hash) ? hash : "weekly";
+}
+
 export default function App() {
-  const [activeKey, setActiveKey] = useState("weekly");
+  const [activeKey, setActiveKey] = useState(getInitialTab);
+
+  // 현재 탭을 주소 해시에 기록 → 새로고침해도 같은 탭이 유지됨
+  useEffect(() => {
+    window.history.replaceState(null, "", `#${activeKey}`);
+  }, [activeKey]);
 
   return (
     <div style={{ height: "100vh", display: "flex", flexDirection: "column", fontFamily: "'Apple SD Gothic Neo','Noto Sans KR',sans-serif" }}>
