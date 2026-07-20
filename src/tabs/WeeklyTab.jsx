@@ -270,6 +270,12 @@ export default function WeeklyTab() {
     if (error) loadTasks(); // 실패하면 원래 상태로 다시 동기화
   };
 
+  const toggleImportant = async (task) => {
+    setTasks((prev) => prev.map((t) => (t.id === task.id ? { ...t, important: !t.important } : t)));
+    const { error } = await supabase.from(WEEKLY_TABLE).update({ important: !task.important }).eq("id", task.id);
+    if (error) loadTasks();
+  };
+
   const deleteTask = async (task) => {
     setTasks((prev) => prev.filter((t) => t.id !== task.id));
     const { error } = await supabase.from(WEEKLY_TABLE).delete().eq("id", task.id);
@@ -297,6 +303,47 @@ export default function WeeklyTab() {
     setTasks((prev) => prev.map((t) => (t.id === task.id ? { ...t, content: trimmed } : t)));
     const { error } = await supabase.from(WEEKLY_TABLE).update({ content: trimmed }).eq("id", task.id);
     if (error) loadTasks(); // 실패하면 원래 상태로 다시 동기화
+  };
+
+  // ----- 할 일 드래그로 순서 조정 (같은 담당자 목록 안에서만) -----
+  const [dragTaskId, setDragTaskId] = useState(null);
+  const [dragOverTaskId, setDragOverTaskId] = useState(null);
+
+  const persistTaskOrder = useCallback(async (orderedTasks) => {
+    const ids = orderedTasks.map((t) => t.id);
+    setTasks((prev) => {
+      const next = [...prev];
+      ids.forEach((id, idx) => {
+        const i = next.findIndex((t) => t.id === id);
+        if (i !== -1) next[i] = { ...next[i], sort_order: idx };
+      });
+      return next;
+    });
+    await Promise.all(ids.map((id, idx) => supabase.from(WEEKLY_TABLE).update({ sort_order: idx }).eq("id", id)));
+  }, []);
+
+  const handleTaskDragStart = (taskId) => () => setDragTaskId(taskId);
+  const handleTaskDragOver = (taskId) => (e) => {
+    if (!dragTaskId || dragTaskId === taskId) return;
+    e.preventDefault();
+    setDragOverTaskId(taskId);
+  };
+  const handleTaskDrop = (list) => (taskId) => (e) => {
+    if (!dragTaskId || dragTaskId === taskId) return;
+    e.preventDefault();
+    const current = [...list];
+    const fromIdx = current.findIndex((t) => t.id === dragTaskId);
+    const toIdx = current.findIndex((t) => t.id === taskId);
+    if (fromIdx === -1 || toIdx === -1) return;
+    const [moved] = current.splice(fromIdx, 1);
+    current.splice(toIdx, 0, moved);
+    persistTaskOrder(current);
+    setDragTaskId(null);
+    setDragOverTaskId(null);
+  };
+  const handleTaskDragEnd = () => {
+    setDragTaskId(null);
+    setDragOverTaskId(null);
   };
 
   // ----- 빠른 입력 (담당자 섹션 안에서 내용만 치고 Enter) -----
@@ -597,8 +644,46 @@ export default function WeeklyTab() {
 
                 <div style={{ padding: "6px 12px", borderBottomLeftRadius: 8, borderBottomRightRadius: 8 }}>
                   {list.map((task) => (
-                    <div key={task.id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "4px 0" }}>
+                    <div
+                      key={task.id}
+                      draggable={editingTaskId !== task.id}
+                      onDragStart={handleTaskDragStart(task.id)}
+                      onDragOver={handleTaskDragOver(task.id)}
+                      onDrop={handleTaskDrop(list)(task.id)}
+                      onDragEnd={handleTaskDragEnd}
+                      style={{
+                        display: "flex",
+                        alignItems: "center",
+                        gap: 6,
+                        padding: "4px 0",
+                        borderTop: dragOverTaskId === task.id ? "2px solid #00b894" : "2px solid transparent",
+                        opacity: dragTaskId === task.id ? 0.5 : 1,
+                      }}
+                    >
+                      <span
+                        title="드래그해서 순서 바꾸기"
+                        style={{ cursor: "grab", color: "#dfe6e9", fontSize: 12, width: 12, textAlign: "center", userSelect: "none", flexShrink: 0 }}
+                      >
+                        ⠿
+                      </span>
                       <input type="checkbox" checked={!!task.done} onChange={() => toggleDone(task)} />
+                      <button
+                        onClick={() => toggleImportant(task)}
+                        title={task.important ? "중요 표시 해제" : "중요 표시"}
+                        style={{
+                          background: "none",
+                          border: "none",
+                          cursor: "pointer",
+                          fontSize: 13,
+                          padding: 0,
+                          lineHeight: 1,
+                          flexShrink: 0,
+                          opacity: task.important ? 1 : 0.25,
+                          filter: task.important ? "none" : "grayscale(1)",
+                        }}
+                      >
+                        ❗️
+                      </button>
                       {editingTaskId === task.id ? (
                         <input
                           type="text"
@@ -635,7 +720,8 @@ export default function WeeklyTab() {
                           style={{
                             fontSize: 13,
                             flex: 1,
-                            color: task.done ? "#b2bec3" : "#2d3436",
+                            color: task.done ? "#b2bec3" : task.important ? "#d63031" : "#2d3436",
+                            fontWeight: task.important && !task.done ? 600 : 400,
                             textDecoration: task.done ? "line-through" : "none",
                             cursor: "text",
                             padding: "3px 5px",
@@ -655,8 +741,10 @@ export default function WeeklyTab() {
                     </div>
                   ))}
                   {/* 이 담당자 밑에 바로 이어서 입력 → Enter로 즉시 등록 */}
-                  <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "4px 0" }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 6, padding: "4px 0" }}>
+                    <span style={{ width: 12, flexShrink: 0 }} />
                     <span style={{ width: 16, textAlign: "center", color: "#dfe6e9", fontSize: 13 }}>＋</span>
+                    <span style={{ width: 16, flexShrink: 0 }} />
                     <input
                       type="text"
                       placeholder="할 일 입력 후 Enter"
