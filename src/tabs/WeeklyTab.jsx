@@ -572,8 +572,6 @@ export default function WeeklyTab() {
               return (
               <div
                 key={assignee}
-                draggable={canReorderAssignees}
-                onDragStart={handleAssigneeDragStart(assignee)}
                 onDragOver={handleAssigneeDragOver(assignee)}
                 onDrop={handleAssigneeDrop(orderedAssigneeNames)(assignee)}
                 onDragEnd={handleAssigneeDragEnd}
@@ -584,7 +582,11 @@ export default function WeeklyTab() {
                   opacity: dragAssignee === assignee ? 0.5 : 1,
                 }}
               >
-                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "8px 12px", background: "#f8f9fa", borderBottom: "1px solid #eee", borderTopLeftRadius: 8, borderTopRightRadius: 8 }}>
+                <div
+                  draggable={canReorderAssignees}
+                  onDragStart={handleAssigneeDragStart(assignee)}
+                  style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "8px 12px", background: "#f8f9fa", borderBottom: "1px solid #eee", borderTopLeftRadius: 8, borderTopRightRadius: 8 }}
+                >
                   <div style={{ position: "relative", display: "flex", alignItems: "center", gap: 4 }}>
                     {canReorderAssignees && (
                       <span
