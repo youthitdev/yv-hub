@@ -4,7 +4,122 @@ import { supabase } from "../supabaseClient";
 
 const WEEKLY_TABLE = "weekly_tasks";
 const ASSIGNEE_EMOJI_TABLE = "assignee_emojis";
+const TASK_GROUP_TABLE = "weekly_task_groups";
 const DEFAULT_ASSIGNEE_EMOJI = "🙋";
+
+// ---------- 할 일 한 줄 (체크박스 + 중요표시 + 인라인 수정 + 삭제 + 드래그) ----------
+// 미분류 목록/그룹별 목록에서 공통으로 재사용
+function TaskRow({
+  task,
+  bucketKey,
+  editingTaskId,
+  editDraft,
+  setEditDraft,
+  startEditingTask,
+  cancelEditingTask,
+  commitEditingTask,
+  toggleDone,
+  toggleImportant,
+  deleteTask,
+  dragTaskId,
+  dragOverTaskId,
+  onGrabStart,
+}) {
+  return (
+    <div
+      data-task-row-id={task.id}
+      data-bucket-key={bucketKey}
+      style={{
+        display: "flex",
+        alignItems: "center",
+        gap: 6,
+        padding: "4px 0",
+        borderTop: dragOverTaskId === String(task.id) ? "2px solid #00b894" : "2px solid transparent",
+        opacity: dragTaskId === String(task.id) ? 0.5 : 1,
+      }}
+    >
+      <span
+        title="드래그해서 순서 바꾸기"
+        onMouseDown={onGrabStart}
+        style={{ cursor: "grab", color: "#dfe6e9", fontSize: 12, width: 12, textAlign: "center", userSelect: "none", flexShrink: 0 }}
+      >
+        ⠿
+      </span>
+      <input type="checkbox" checked={!!task.done} onChange={() => toggleDone(task)} />
+      <button
+        onClick={() => toggleImportant(task)}
+        title={task.important ? "중요 표시 해제" : "중요 표시"}
+        style={{
+          background: "none",
+          border: "none",
+          cursor: "pointer",
+          fontSize: 13,
+          padding: 0,
+          lineHeight: 1,
+          flexShrink: 0,
+          opacity: task.important ? 1 : 0.25,
+          filter: task.important ? "none" : "grayscale(1)",
+        }}
+      >
+        ❗️
+      </button>
+      {editingTaskId === task.id ? (
+        <input
+          type="text"
+          autoFocus
+          value={editDraft}
+          onChange={(e) => setEditDraft(e.target.value)}
+          onBlur={() => commitEditingTask(task)}
+          onKeyDown={(e) => {
+            if (e.nativeEvent.isComposing || e.keyCode === 229) return; // 한글 등 IME 조합 중 처리 방지
+            if (e.key === "Enter") {
+              e.preventDefault();
+              e.currentTarget.blur(); // blur 핸들러에서 저장
+            } else if (e.key === "Escape") {
+              e.preventDefault();
+              cancelEditingTask();
+            }
+          }}
+          style={{
+            flex: 1,
+            fontSize: 13,
+            border: "none",
+            outline: "none",
+            background: "#fff",
+            boxShadow: "0 0 0 1px #00b894 inset",
+            borderRadius: 4,
+            padding: "3px 5px",
+            color: "#2d3436",
+          }}
+        />
+      ) : (
+        <span
+          onClick={() => startEditingTask(task)}
+          title="클릭해서 수정"
+          style={{
+            fontSize: 13,
+            flex: 1,
+            color: task.done ? "#b2bec3" : task.important ? "#d63031" : "#2d3436",
+            fontWeight: task.important && !task.done ? 600 : 400,
+            textDecoration: task.done ? "line-through" : "none",
+            cursor: "text",
+            padding: "3px 5px",
+            borderRadius: 4,
+          }}
+        >
+          {task.content}
+        </span>
+      )}
+      <button
+        onClick={() => deleteTask(task)}
+        style={{ background: "none", border: "none", color: "#b2bec3", cursor: "pointer", fontSize: 13 }}
+        title="삭제"
+      >
+        ✕
+      </button>
+    </div>
+  );
+}
 
 // ---------- 날짜 헬퍼 (KST 기준) ----------
 
@@ -248,6 +363,9 @@ export default function WeeklyTab() {
       if (!map[t.assignee]) map[t.assignee] = [];
       map[t.assignee].push(t);
     }
+    for (const key in map) {
+      map[key].sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0));
+    }
     return map;
   }, [tasks, assigneeFilter]);
 
@@ -305,9 +423,16 @@ export default function WeeklyTab() {
     if (error) loadTasks(); // 실패하면 원래 상태로 다시 동기화
   };
 
-  // ----- 할 일 드래그로 순서 조정 (같은 담당자 목록 안에서만) -----
-  const [dragTaskId, setDragTaskId] = useState(null);
-  const [dragOverTaskId, setDragOverTaskId] = useState(null);
+  // ----- 할 일 드래그로 순서 조정 (같은 그룹/미분류 목록 안에서만) -----
+  // 네이티브 HTML5 draggable은 담당자 카드처럼 큰 블록엔 잘 동작하지만,
+  // 체크박스·버튼·인라인 입력이 섞인 한 줄짜리 항목에선 브라우저마다 잘 안 먹는 경우가 많아
+  // 마우스 이벤트 기반으로 직접 구현 (노션 등에서 쓰는 방식)
+  const [dragTaskId, setDragTaskId] = useState(null); // 문자열 id
+  const [dragOverTaskId, setDragOverTaskId] = useState(null); // 문자열 id
+  const dragTaskIdRef = useRef(null);
+  const dragOverTaskIdRef = useRef(null);
+  const dragBucketKeyRef = useRef(null);
+  const bucketListsRef = useRef({}); // { [bucketKey]: Task[] } — 렌더마다 최신 목록으로 갱신해둠
 
   const persistTaskOrder = useCallback(async (orderedTasks) => {
     const ids = orderedTasks.map((t) => t.id);
@@ -322,48 +447,73 @@ export default function WeeklyTab() {
     await Promise.all(ids.map((id, idx) => supabase.from(WEEKLY_TABLE).update({ sort_order: idx }).eq("id", id)));
   }, []);
 
-  const handleTaskDragStart = (taskId) => () => setDragTaskId(taskId);
-  const handleTaskDragOver = (taskId) => (e) => {
-    if (!dragTaskId || dragTaskId === taskId) return;
+  const startTaskDrag = (task, bucketKey) => (e) => {
     e.preventDefault();
-    setDragOverTaskId(taskId);
-  };
-  const handleTaskDrop = (list) => (taskId) => (e) => {
-    if (!dragTaskId || dragTaskId === taskId) return;
-    e.preventDefault();
-    const current = [...list];
-    const fromIdx = current.findIndex((t) => t.id === dragTaskId);
-    const toIdx = current.findIndex((t) => t.id === taskId);
-    if (fromIdx === -1 || toIdx === -1) return;
-    const [moved] = current.splice(fromIdx, 1);
-    current.splice(toIdx, 0, moved);
-    persistTaskOrder(current);
-    setDragTaskId(null);
-    setDragOverTaskId(null);
-  };
-  const handleTaskDragEnd = () => {
-    setDragTaskId(null);
-    setDragOverTaskId(null);
+    const id = String(task.id);
+    dragTaskIdRef.current = id;
+    dragOverTaskIdRef.current = id;
+    dragBucketKeyRef.current = bucketKey;
+    setDragTaskId(id);
+    setDragOverTaskId(id);
+
+    const handleMouseMove = (moveEvent) => {
+      const el = document.elementFromPoint(moveEvent.clientX, moveEvent.clientY);
+      const rowEl = el && el.closest("[data-task-row-id]");
+      if (!rowEl || rowEl.dataset.bucketKey !== dragBucketKeyRef.current) return;
+      const overId = rowEl.dataset.taskRowId;
+      if (overId !== dragOverTaskIdRef.current) {
+        dragOverTaskIdRef.current = overId;
+        setDragOverTaskId(overId);
+      }
+    };
+
+    const finishDrag = () => {
+      document.removeEventListener("mousemove", handleMouseMove);
+      document.removeEventListener("mouseup", finishDrag);
+      const fromId = dragTaskIdRef.current;
+      const toId = dragOverTaskIdRef.current;
+      const bucketKey = dragBucketKeyRef.current;
+      dragTaskIdRef.current = null;
+      dragOverTaskIdRef.current = null;
+      dragBucketKeyRef.current = null;
+      setDragTaskId(null);
+      setDragOverTaskId(null);
+      if (!fromId || !toId || fromId === toId) return;
+      const bucket = bucketListsRef.current[bucketKey] || [];
+      const arr = [...bucket];
+      const fromIdx = arr.findIndex((t) => String(t.id) === fromId);
+      const toIdx = arr.findIndex((t) => String(t.id) === toId);
+      if (fromIdx === -1 || toIdx === -1) return;
+      const [moved] = arr.splice(fromIdx, 1);
+      arr.splice(toIdx, 0, moved);
+      persistTaskOrder(arr);
+    };
+
+    document.addEventListener("mousemove", handleMouseMove);
+    document.addEventListener("mouseup", finishDrag);
   };
 
   // ----- 빠른 입력 (담당자 섹션 안에서 내용만 치고 Enter) -----
-  const [drafts, setDrafts] = useState({}); // { [assignee]: "입력중인 텍스트" }
+  // key는 미분류면 assignee 그대로, 그룹 안이면 "assignee::groupName" 형태로 구분
+  const [drafts, setDrafts] = useState({}); // { [key]: "입력중인 텍스트" }
   const [quickAddError, setQuickAddError] = useState("");
 
-  const setDraft = (assignee, value) => {
-    setDrafts((prev) => ({ ...prev, [assignee]: value }));
+  const draftKey = (assignee, groupName) => (groupName ? `${assignee}::${groupName}` : assignee);
+
+  const setDraft = (assignee, value, groupName = null) => {
+    setDrafts((prev) => ({ ...prev, [draftKey(assignee, groupName)]: value }));
   };
 
-  const quickAdd = async (assignee, content) => {
+  const quickAdd = async (assignee, content, groupName = null) => {
     const trimmed = content.trim();
     if (!trimmed) return;
-    const maxOrder = tasks.filter((t) => t.assignee === assignee).length;
+    const maxOrder = tasks.filter((t) => t.assignee === assignee && (t.program_tag || null) === (groupName || null)).length;
     const { data, error } = await supabase
       .from(WEEKLY_TABLE)
       .insert({
         week_start: weekKey,
         assignee,
-        program_tag: null,
+        program_tag: groupName || null,
         content: trimmed,
         done: false,
         sort_order: maxOrder,
@@ -375,8 +525,61 @@ export default function WeeklyTab() {
       return;
     }
     setTasks((prev) => [...prev, data]);
-    setDraft(assignee, "");
+    setDraft(assignee, "", groupName);
     setQuickAddError("");
+  };
+
+  // ----- 담당자별 그룹(소제목) — 슬랙/노션처럼 그룹을 만들고 그 안에 할 일을 넣기 -----
+  const [taskGroups, setTaskGroups] = useState([]); // [{id, assignee, name, sort_order}]
+
+  const loadTaskGroups = useCallback(async () => {
+    const { data, error } = await supabase.from(TASK_GROUP_TABLE).select("*").order("sort_order", { ascending: true });
+    if (!error) setTaskGroups(data || []);
+  }, []);
+
+  useEffect(() => {
+    loadTaskGroups();
+  }, [loadTaskGroups]);
+
+  const groupsByAssignee = useMemo(() => {
+    const map = {};
+    for (const g of taskGroups) {
+      if (!map[g.assignee]) map[g.assignee] = [];
+      map[g.assignee].push(g);
+    }
+    return map;
+  }, [taskGroups]);
+
+  const [addingGroupFor, setAddingGroupFor] = useState(null); // 그룹 이름 입력창이 열려있는 담당자
+  const [newGroupDrafts, setNewGroupDrafts] = useState({}); // { [assignee]: "입력중인 그룹명" }
+
+  const addGroup = async (assignee, name) => {
+    const trimmed = name.trim();
+    setAddingGroupFor(null);
+    if (!trimmed) return;
+    const maxOrder = (groupsByAssignee[assignee] || []).length;
+    const { data, error } = await supabase
+      .from(TASK_GROUP_TABLE)
+      .insert({ assignee, name: trimmed, sort_order: maxOrder })
+      .select()
+      .single();
+    if (error) return;
+    setTaskGroups((prev) => [...prev, data]);
+    setNewGroupDrafts((prev) => ({ ...prev, [assignee]: "" }));
+  };
+
+  const deleteGroup = async (group) => {
+    setTaskGroups((prev) => prev.filter((g) => g.id !== group.id));
+    // 그룹에 있던 이번주 할 일은 삭제하지 않고 "미분류"로 되돌림
+    setTasks((prev) => prev.map((t) => (t.assignee === group.assignee && t.program_tag === group.name ? { ...t, program_tag: null } : t)));
+    await supabase
+      .from(WEEKLY_TABLE)
+      .update({ program_tag: null })
+      .eq("assignee", group.assignee)
+      .eq("program_tag", group.name)
+      .eq("week_start", weekKey);
+    const { error } = await supabase.from(TASK_GROUP_TABLE).delete().eq("id", group.id);
+    if (error) loadTaskGroups();
   };
 
   // ----- 새 담당자 추가 (아직 목록에 없는 사람 처음 등록할 때만) -----
@@ -425,19 +628,30 @@ export default function WeeklyTab() {
 
     const relevant = prevTasks.filter((t) => t.assignee === assigneeName);
     const existingContents = new Set(tasks.filter((t) => t.assignee === assigneeName).map((t) => t.content));
-    let nextOrder = tasks.filter((t) => t.assignee === assigneeName).length;
+
+    // 그룹(program_tag)별로 각각 순서를 이어붙이기 위한 카운터
+    const bucketKey = (tag) => tag || "";
+    const bucketCounts = {};
+    for (const t of tasks) {
+      if (t.assignee !== assigneeName) continue;
+      const k = bucketKey(t.program_tag);
+      bucketCounts[k] = (bucketCounts[k] || 0) + 1;
+    }
 
     const toInsert = [];
     for (const t of relevant) {
       if (existingContents.has(t.content)) continue;
       existingContents.add(t.content);
+      const k = bucketKey(t.program_tag);
+      const order = bucketCounts[k] || 0;
+      bucketCounts[k] = order + 1;
       toInsert.push({
         week_start: weekKey,
         assignee: assigneeName,
-        program_tag: null,
+        program_tag: t.program_tag || null, // 지난주 그룹 소속도 그대로 유지
         content: t.content,
         done: false,
-        sort_order: nextOrder++,
+        sort_order: order,
       });
     }
 
@@ -569,6 +783,9 @@ export default function WeeklyTab() {
 
             {orderedAssigneeNames.map((assignee) => {
               const list = tasksByAssignee[assignee];
+              const groups = groupsByAssignee[assignee] || [];
+              const groupNameSet = new Set(groups.map((g) => g.name));
+              const ungroupedTasks = list.filter((t) => !t.program_tag || !groupNameSet.has(t.program_tag));
               return (
               <div
                 key={assignee}
@@ -645,104 +862,31 @@ export default function WeeklyTab() {
                 </div>
 
                 <div style={{ padding: "6px 12px", borderBottomLeftRadius: 8, borderBottomRightRadius: 8 }}>
-                  {list.map((task) => (
-                    <div
-                      key={task.id}
-                      draggable={editingTaskId !== task.id}
-                      onDragStart={handleTaskDragStart(task.id)}
-                      onDragOver={handleTaskDragOver(task.id)}
-                      onDrop={handleTaskDrop(list)(task.id)}
-                      onDragEnd={handleTaskDragEnd}
-                      style={{
-                        display: "flex",
-                        alignItems: "center",
-                        gap: 6,
-                        padding: "4px 0",
-                        borderTop: dragOverTaskId === task.id ? "2px solid #00b894" : "2px solid transparent",
-                        opacity: dragTaskId === task.id ? 0.5 : 1,
-                      }}
-                    >
-                      <span
-                        title="드래그해서 순서 바꾸기"
-                        style={{ cursor: "grab", color: "#dfe6e9", fontSize: 12, width: 12, textAlign: "center", userSelect: "none", flexShrink: 0 }}
-                      >
-                        ⠿
-                      </span>
-                      <input type="checkbox" checked={!!task.done} onChange={() => toggleDone(task)} />
-                      <button
-                        onClick={() => toggleImportant(task)}
-                        title={task.important ? "중요 표시 해제" : "중요 표시"}
-                        style={{
-                          background: "none",
-                          border: "none",
-                          cursor: "pointer",
-                          fontSize: 13,
-                          padding: 0,
-                          lineHeight: 1,
-                          flexShrink: 0,
-                          opacity: task.important ? 1 : 0.25,
-                          filter: task.important ? "none" : "grayscale(1)",
-                        }}
-                      >
-                        ❗️
-                      </button>
-                      {editingTaskId === task.id ? (
-                        <input
-                          type="text"
-                          autoFocus
-                          value={editDraft}
-                          onChange={(e) => setEditDraft(e.target.value)}
-                          onBlur={() => commitEditingTask(task)}
-                          onKeyDown={(e) => {
-                            if (e.nativeEvent.isComposing || e.keyCode === 229) return; // 한글 등 IME 조합 중 처리 방지
-                            if (e.key === "Enter") {
-                              e.preventDefault();
-                              e.currentTarget.blur(); // blur 핸들러에서 저장
-                            } else if (e.key === "Escape") {
-                              e.preventDefault();
-                              cancelEditingTask();
-                            }
-                          }}
-                          style={{
-                            flex: 1,
-                            fontSize: 13,
-                            border: "none",
-                            outline: "none",
-                            background: "#fff",
-                            boxShadow: "0 0 0 1px #00b894 inset",
-                            borderRadius: 4,
-                            padding: "3px 5px",
-                            color: "#2d3436",
-                          }}
-                        />
-                      ) : (
-                        <span
-                          onClick={() => startEditingTask(task)}
-                          title="클릭해서 수정"
-                          style={{
-                            fontSize: 13,
-                            flex: 1,
-                            color: task.done ? "#b2bec3" : task.important ? "#d63031" : "#2d3436",
-                            fontWeight: task.important && !task.done ? 600 : 400,
-                            textDecoration: task.done ? "line-through" : "none",
-                            cursor: "text",
-                            padding: "3px 5px",
-                            borderRadius: 4,
-                          }}
-                        >
-                          {task.content}
-                        </span>
-                      )}
-                      <button
-                        onClick={() => deleteTask(task)}
-                        style={{ background: "none", border: "none", color: "#b2bec3", cursor: "pointer", fontSize: 13 }}
-                        title="삭제"
-                      >
-                        ✕
-                      </button>
-                    </div>
-                  ))}
-                  {/* 이 담당자 밑에 바로 이어서 입력 → Enter로 즉시 등록 */}
+                  {/* 미분류 할 일 */}
+                  {(() => {
+                    const ungroupedBucketKey = `${assignee}::__none__`;
+                    bucketListsRef.current[ungroupedBucketKey] = ungroupedTasks;
+                    return ungroupedTasks.map((task) => (
+                      <TaskRow
+                        key={task.id}
+                        task={task}
+                        bucketKey={ungroupedBucketKey}
+                        editingTaskId={editingTaskId}
+                        editDraft={editDraft}
+                        setEditDraft={setEditDraft}
+                        startEditingTask={startEditingTask}
+                        cancelEditingTask={cancelEditingTask}
+                        commitEditingTask={commitEditingTask}
+                        toggleDone={toggleDone}
+                        toggleImportant={toggleImportant}
+                        deleteTask={deleteTask}
+                        dragTaskId={dragTaskId}
+                        dragOverTaskId={dragOverTaskId}
+                        onGrabStart={startTaskDrag(task, ungroupedBucketKey)}
+                      />
+                    ));
+                  })()}
+                  {/* 이 담당자 밑에 바로 이어서 입력 → Enter로 즉시 등록 (미분류) */}
                   <div style={{ display: "flex", alignItems: "center", gap: 6, padding: "4px 0" }}>
                     <span style={{ width: 12, flexShrink: 0 }} />
                     <span style={{ width: 16, textAlign: "center", color: "#dfe6e9", fontSize: 13 }}>＋</span>
@@ -750,12 +894,12 @@ export default function WeeklyTab() {
                     <input
                       type="text"
                       placeholder="할 일 입력 후 Enter"
-                      value={drafts[assignee] || ""}
+                      value={drafts[draftKey(assignee, null)] || ""}
                       onChange={(e) => setDraft(assignee, e.target.value)}
                       onKeyDown={(e) => {
                         if (e.key !== "Enter") return;
                         if (e.nativeEvent.isComposing || e.keyCode === 229) return; // 한글 등 IME 조합 중 Enter 중복 방지
-                        quickAdd(assignee, drafts[assignee] || "");
+                        quickAdd(assignee, drafts[draftKey(assignee, null)] || "");
                       }}
                       style={{
                         flex: 1,
@@ -767,6 +911,122 @@ export default function WeeklyTab() {
                         color: "#2d3436",
                       }}
                     />
+                  </div>
+
+                  {/* 그룹(소제목)들 — 슬랙/노션처럼 */}
+                  {groups.map((group) => {
+                    const groupTasks = list.filter((t) => t.program_tag === group.name);
+                    const groupBucketKey = `${assignee}::${group.name}`;
+                    bucketListsRef.current[groupBucketKey] = groupTasks;
+                    return (
+                      <div key={group.id} style={{ marginTop: 14 }}>
+                        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "4px 0", borderBottom: "1px solid #eee", marginBottom: 4 }}>
+                          <span style={{ fontSize: 13, fontWeight: 700, textDecoration: "underline", color: "#2d3436" }}>{group.name}</span>
+                          <button
+                            onClick={() => deleteGroup(group)}
+                            title="그룹 삭제 (안의 할 일은 미분류로 이동)"
+                            style={{ background: "none", border: "none", color: "#dfe6e9", cursor: "pointer", fontSize: 12 }}
+                          >
+                            ✕
+                          </button>
+                        </div>
+                        {groupTasks.map((task) => (
+                          <TaskRow
+                            key={task.id}
+                            task={task}
+                            bucketKey={groupBucketKey}
+                            editingTaskId={editingTaskId}
+                            editDraft={editDraft}
+                            setEditDraft={setEditDraft}
+                            startEditingTask={startEditingTask}
+                            cancelEditingTask={cancelEditingTask}
+                            commitEditingTask={commitEditingTask}
+                            toggleDone={toggleDone}
+                            toggleImportant={toggleImportant}
+                            deleteTask={deleteTask}
+                            dragTaskId={dragTaskId}
+                            dragOverTaskId={dragOverTaskId}
+                            onGrabStart={startTaskDrag(task, groupBucketKey)}
+                          />
+                        ))}
+                        <div style={{ display: "flex", alignItems: "center", gap: 6, padding: "4px 0" }}>
+                          <span style={{ width: 12, flexShrink: 0 }} />
+                          <span style={{ width: 16, textAlign: "center", color: "#dfe6e9", fontSize: 13 }}>＋</span>
+                          <span style={{ width: 16, flexShrink: 0 }} />
+                          <input
+                            type="text"
+                            placeholder="할 일 입력 후 Enter"
+                            value={drafts[draftKey(assignee, group.name)] || ""}
+                            onChange={(e) => setDraft(assignee, e.target.value, group.name)}
+                            onKeyDown={(e) => {
+                              if (e.key !== "Enter") return;
+                              if (e.nativeEvent.isComposing || e.keyCode === 229) return;
+                              quickAdd(assignee, drafts[draftKey(assignee, group.name)] || "", group.name);
+                            }}
+                            style={{
+                              flex: 1,
+                              fontSize: 13,
+                              border: "none",
+                              outline: "none",
+                              background: "transparent",
+                              padding: "4px 0",
+                              color: "#2d3436",
+                            }}
+                          />
+                        </div>
+                      </div>
+                    );
+                  })}
+
+                  {/* 그룹 추가 */}
+                  <div style={{ marginTop: 10 }}>
+                    {addingGroupFor === assignee ? (
+                      <input
+                        type="text"
+                        autoFocus
+                        placeholder="그룹 이름 입력 후 Enter"
+                        value={newGroupDrafts[assignee] || ""}
+                        onChange={(e) => setNewGroupDrafts((prev) => ({ ...prev, [assignee]: e.target.value }))}
+                        onBlur={() => addGroup(assignee, newGroupDrafts[assignee] || "")}
+                        onKeyDown={(e) => {
+                          if (e.nativeEvent.isComposing || e.keyCode === 229) return;
+                          if (e.key === "Enter") {
+                            e.preventDefault();
+                            e.currentTarget.blur(); // blur 핸들러에서 생성
+                          } else if (e.key === "Escape") {
+                            e.preventDefault();
+                            setNewGroupDrafts((prev) => ({ ...prev, [assignee]: "" }));
+                            setAddingGroupFor(null);
+                          }
+                        }}
+                        style={{
+                          width: "100%",
+                          fontSize: 12,
+                          border: "1px solid #00b894",
+                          outline: "none",
+                          borderRadius: 6,
+                          padding: "5px 8px",
+                          color: "#2d3436",
+                        }}
+                      />
+                    ) : (
+                      <button
+                        onClick={() => setAddingGroupFor(assignee)}
+                        style={{
+                          fontSize: 12,
+                          color: "#636e72",
+                          background: "none",
+                          border: "1px dashed #dfe6e9",
+                          borderRadius: 6,
+                          padding: "5px 8px",
+                          cursor: "pointer",
+                          width: "100%",
+                          textAlign: "left",
+                        }}
+                      >
+                        + 그룹 추가
+                      </button>
+                    )}
                   </div>
                 </div>
               </div>
