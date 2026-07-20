@@ -276,6 +276,29 @@ export default function WeeklyTab() {
     if (error) loadTasks();
   };
 
+  // ----- 할 일 내용 인라인 수정 (노션/슬랙처럼 클릭해서 바로 편집) -----
+  const [editingTaskId, setEditingTaskId] = useState(null);
+  const [editDraft, setEditDraft] = useState("");
+
+  const startEditingTask = (task) => {
+    setEditingTaskId(task.id);
+    setEditDraft(task.content);
+  };
+
+  const cancelEditingTask = () => {
+    setEditingTaskId(null);
+    setEditDraft("");
+  };
+
+  const commitEditingTask = async (task) => {
+    const trimmed = editDraft.trim();
+    setEditingTaskId(null);
+    if (!trimmed || trimmed === task.content) return; // 빈 값이거나 변경 없으면 그냥 취소 처리 (삭제는 ✕ 버튼으로만)
+    setTasks((prev) => prev.map((t) => (t.id === task.id ? { ...t, content: trimmed } : t)));
+    const { error } = await supabase.from(WEEKLY_TABLE).update({ content: trimmed }).eq("id", task.id);
+    if (error) loadTasks(); // 실패하면 원래 상태로 다시 동기화
+  };
+
   // ----- 빠른 입력 (담당자 섹션 안에서 내용만 치고 Enter) -----
   const [drafts, setDrafts] = useState({}); // { [assignee]: "입력중인 텍스트" }
   const [quickAddError, setQuickAddError] = useState("");
@@ -576,16 +599,52 @@ export default function WeeklyTab() {
                   {list.map((task) => (
                     <div key={task.id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "4px 0" }}>
                       <input type="checkbox" checked={!!task.done} onChange={() => toggleDone(task)} />
-                      <span
-                        style={{
-                          fontSize: 13,
-                          flex: 1,
-                          color: task.done ? "#b2bec3" : "#2d3436",
-                          textDecoration: task.done ? "line-through" : "none",
-                        }}
-                      >
-                        {task.content}
-                      </span>
+                      {editingTaskId === task.id ? (
+                        <input
+                          type="text"
+                          autoFocus
+                          value={editDraft}
+                          onChange={(e) => setEditDraft(e.target.value)}
+                          onBlur={() => commitEditingTask(task)}
+                          onKeyDown={(e) => {
+                            if (e.nativeEvent.isComposing || e.keyCode === 229) return; // 한글 등 IME 조합 중 처리 방지
+                            if (e.key === "Enter") {
+                              e.preventDefault();
+                              e.currentTarget.blur(); // blur 핸들러에서 저장
+                            } else if (e.key === "Escape") {
+                              e.preventDefault();
+                              cancelEditingTask();
+                            }
+                          }}
+                          style={{
+                            flex: 1,
+                            fontSize: 13,
+                            border: "none",
+                            outline: "none",
+                            background: "#fff",
+                            boxShadow: "0 0 0 1px #00b894 inset",
+                            borderRadius: 4,
+                            padding: "3px 5px",
+                            color: "#2d3436",
+                          }}
+                        />
+                      ) : (
+                        <span
+                          onClick={() => startEditingTask(task)}
+                          title="클릭해서 수정"
+                          style={{
+                            fontSize: 13,
+                            flex: 1,
+                            color: task.done ? "#b2bec3" : "#2d3436",
+                            textDecoration: task.done ? "line-through" : "none",
+                            cursor: "text",
+                            padding: "3px 5px",
+                            borderRadius: 4,
+                          }}
+                        >
+                          {task.content}
+                        </span>
+                      )}
                       <button
                         onClick={() => deleteTask(task)}
                         style={{ background: "none", border: "none", color: "#b2bec3", cursor: "pointer", fontSize: 13 }}
