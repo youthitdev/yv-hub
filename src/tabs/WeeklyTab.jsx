@@ -423,6 +423,24 @@ export default function WeeklyTab() {
     if (error) loadTasks(); // 실패하면 원래 상태로 다시 동기화
   };
 
+  // 여러 할 일을 드래그로 선택해서 복사할 때, 브라우저가 줄바꿈 없이 한 줄로 붙여넣는 경우가 있어
+  // 복사 이벤트를 가로채서 각 할 일을 줄바꿈으로 직접 이어붙여 클립보드에 넣어줌
+  const handleChecklistCopy = (e) => {
+    const selection = window.getSelection();
+    if (!selection || selection.rangeCount === 0 || selection.isCollapsed) return;
+    const fragment = selection.getRangeAt(0).cloneContents();
+    const wrapper = document.createElement("div");
+    wrapper.appendChild(fragment);
+    const rowEls = wrapper.querySelectorAll("[data-task-row-id]");
+    if (rowEls.length === 0) return; // 한 줄 안에서 일부만 선택한 경우는 브라우저 기본 동작 그대로
+    const lines = Array.from(rowEls).map((el) => {
+      const contentEl = el.querySelector('span[title="클릭해서 수정"]');
+      return (contentEl ? contentEl.textContent : el.textContent).trim();
+    });
+    e.preventDefault();
+    e.clipboardData.setData("text/plain", lines.join("\n"));
+  };
+
   // ----- 할 일 드래그로 순서 조정 (같은 그룹/미분류 목록 안에서만) -----
   // 네이티브 HTML5 draggable은 담당자 카드처럼 큰 블록엔 잘 동작하지만,
   // 체크박스·버튼·인라인 입력이 섞인 한 줄짜리 항목에선 브라우저마다 잘 안 먹는 경우가 많아
@@ -759,7 +777,7 @@ export default function WeeklyTab() {
         </div>
 
         {/* 담당자별 체크리스트 (수동) */}
-        <div style={{ background: "white", borderRadius: 10, border: "1px solid #eee" }}>
+        <div onCopy={handleChecklistCopy} style={{ background: "white", borderRadius: 10, border: "1px solid #eee" }}>
           <div style={{ padding: "12px 16px", borderBottom: "1px solid #eee", display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 8, borderTopLeftRadius: 10, borderTopRightRadius: 10 }}>
             <span style={{ fontWeight: 700, fontSize: 14 }}>✅ 담당자별 체크리스트</span>
             <select
