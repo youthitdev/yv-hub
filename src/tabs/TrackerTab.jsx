@@ -99,13 +99,15 @@ async function fetchCount(sheetUrl) {
   const total = dataRows.length;
 
   let recent7 = null;
-  const headerFirst = String(header[0] || "");
-  if (/타임스탬프|timestamp|시간/i.test(headerFirst)) {
+  // 타임스탬프가 항상 첫 번째 열이라고 단정하지 않고, 헤더 전체에서 찾는다
+  // (시트에 "출처" 같은 열이 앞에 추가로 붙어있어도 정상 동작하도록)
+  const timestampColIdx = header.findIndex((h) => /타임스탬프|timestamp/i.test(String(h || "")));
+  if (timestampColIdx !== -1) {
     const threshold = Date.now() - 7 * 24 * 60 * 60 * 1000;
     let cnt = 0;
     let anyParsed = false;
     for (const row of dataRows) {
-      const d = parseTimestamp(row[0]);
+      const d = parseTimestamp(row[timestampColIdx]);
       if (d) {
         anyParsed = true;
         if (d.getTime() >= threshold) cnt++;
