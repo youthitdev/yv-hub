@@ -94,8 +94,18 @@ async function fetchCount(sheetUrl) {
   }
   const parsed = Papa.parse(trimmed);
   const rows = (parsed.data || []).filter((r) => Array.isArray(r) && r.some((cell) => String(cell).trim() !== ""));
-  const header = rows[0] || [];
-  const dataRows = rows.slice(1);
+
+  // 헤더가 항상 첫 번째 줄이라고 단정하지 않고, "타임스탬프" 값이 있는 줄을 찾아 그 줄을 헤더로 사용
+  // (구글시트를 "테이블"로 변환해두면 그 위에 아이콘/요약 줄이 끼어들어 첫 줄이 헤더가 아닌 경우가 있음)
+  let headerRowIdx = 0;
+  for (let i = 0; i < Math.min(rows.length, 5); i++) {
+    if (rows[i].some((cell) => /타임스탬프|timestamp/i.test(String(cell || "")))) {
+      headerRowIdx = i;
+      break;
+    }
+  }
+  const header = rows[headerRowIdx] || [];
+  const dataRows = rows.slice(headerRowIdx + 1);
   const total = dataRows.length;
 
   let recent7 = null;
