@@ -196,7 +196,7 @@ export default function WeeklyTab() {
     setCalWarning("");
     try {
       const params = new URLSearchParams({ start: weekKey, end: toDateKey(weekEnd) });
-      const r = await fetch(`/api/calendar?${params.toString()}`);
+      const r = await fetch(`/api/calendar?${params.toString()}`, { cache: "no-store" });
       const data = await r.json();
       if (!r.ok) throw new Error(data.error || "캘린더를 불러오지 못했어요.");
       setEvents(data.events || []);
