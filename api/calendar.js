@@ -42,17 +42,43 @@ function getCalendarConfigs() {
   return configs;
 }
 
+const KST_MS = 9 * 60 * 60 * 1000;
+
+// 반복 일정의 "삭제된 회차(exdate)" / "변경된 회차(recurrences)"를 찾기 위한 키 후보들
+// (node-ical은 전체 ISO 시각과 날짜(YYYY-MM-DD) 두 가지 키로 저장해둠. 종일 일정은 한국 날짜 기준도 확인)
+function lookupKeys(d) {
+  const iso = d.toISOString();
+  const kstDate = new Date(d.getTime() + KST_MS).toISOString().substring(0, 10);
+  return [iso, iso.substring(0, 10), kstDate];
+}
+function hasKey(obj, d) {
+  if (!obj) return false;
+  return lookupKeys(d).some((k) => obj[k] !== undefined);
+}
+
 function extractEvents(parsed, rangeStart, rangeEnd, cfg) {
   const events = [];
+  const pushEvent = (title, start, end, allDay, location) =>
+    events.push({
+      title: title || "(제목 없음)",
+      start: start.toISOString(),
+      end: end.toISOString(),
+      allDay,
+      location: location || "",
+      calendar: cfg.label,
+      color: cfg.color,
+    });
+
   for (const key in parsed) {
     const ev = parsed[key];
     if (!ev || ev.type !== "VEVENT") continue;
+    if (String(ev.status || "").toUpperCase() === "CANCELLED") continue; // 취소된 일정은 표시하지 않음
 
     const isAllDay = ev.datetype === "date";
     const duration = ev.end && ev.start ? ev.end.getTime() - ev.start.getTime() : 0;
 
     if (ev.rrule) {
-      // 반복 일정: 기간 내 발생하는 occurrence들만 뽑아낸다.
+      // 반복 일정: 기간 내 발생하는 회차들을 뽑되, 삭제된 회차와 따로 변경된 회차는 원래 모습으로 넣지 않는다.
       let occurrences = [];
       try {
         occurrences = ev.rrule.between(rangeStart, rangeEnd, true);
@@ -60,36 +86,30 @@ function extractEvents(parsed, rangeStart, rangeEnd, cfg) {
         occurrences = [];
       }
       for (const occStart of occurrences) {
-        const occEnd = new Date(occStart.getTime() + duration);
-        events.push({
-          title: ev.summary || "(제목 없음)",
-          start: occStart.toISOString(),
-          end: occEnd.toISOString(),
-          allDay: isAllDay,
-          location: ev.location || "",
-          calendar: cfg.label,
-          color: cfg.color,
-        });
+        if (hasKey(ev.exdate, occStart)) continue; // 이 회차만 삭제됨
+        if (hasKey(ev.recurrences, occStart)) continue; // 이 회차만 변경됨 → 아래에서 변경된 내용으로 처리
+        pushEvent(ev.summary, occStart, new Date(occStart.getTime() + duration), isAllDay, ev.location);
+      }
+      // 이 회차만 시간·제목이 바뀐 일정은 바뀐 모습으로 표시 (원래 날짜가 기간 밖이어도 옮겨온 경우 포함)
+      for (const ov of new Set(Object.values(ev.recurrences || {}))) { // 같은 변경 정보가 키 2개로 저장돼 있어 중복 제거
+        if (!ov || !ov.start || !ov.end) continue;
+        if (String(ov.status || "").toUpperCase() === "CANCELLED") continue;
+        if (!(ov.start < rangeEnd && ov.end > rangeStart)) continue;
+        pushEvent(ov.summary || ev.summary, ov.start, ov.end, ov.datetype === "date", ov.location || ev.location);
       }
     } else {
       if (!ev.start || !ev.end) continue;
       const overlaps = ev.start < rangeEnd && ev.end > rangeStart;
       if (!overlaps) continue;
-      events.push({
-        title: ev.summary || "(제목 없음)",
-        start: ev.start.toISOString(),
-        end: ev.end.toISOString(),
-        allDay: isAllDay,
-        location: ev.location || "",
-        calendar: cfg.label,
-        color: cfg.color,
-      });
+      pushEvent(ev.summary, ev.start, ev.end, isAllDay, ev.location);
     }
   }
   return events;
 }
 
 export default async function handler(req, res) {
+  // 새로고침할 때마다 항상 최신 캘린더를 가져오도록 브라우저/Vercel 캐시를 막는다
+  res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0");
   const configs = getCalendarConfigs();
 
   if (configs.length === 0) {
@@ -114,7 +134,7 @@ export default async function handler(req, res) {
   const results = await Promise.all(
     configs.map(async (cfg) => {
       try {
-        const r = await fetch(cfg.url);
+        const r = await fetch(cfg.url, { cache: "no-store", headers: { "Cache-Control": "no-cache" } });
         if (!r.ok) throw new Error(`응답 오류 (status ${r.status})`);
         const icsText = await r.text();
         const parsed = ical.sync.parseICS(icsText);
