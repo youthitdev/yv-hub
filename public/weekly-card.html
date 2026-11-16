@@ -68,9 +68,9 @@ button.primary{background:var(--navy);color:#fff;border-color:var(--navy);font-w
   <h1>유스보이스 주간 카드뉴스</h1>
   <select id="week"></select>
   <select id="theme" title="색 테마"></select>
-  <a class="btn" id="sheetLink" target="_blank" rel="noopener">📝 리포트 시트 열기</a>
-  <button id="reload">시트 다시 불러오기</button>
-  <button class="primary" id="saveAll">PNG 4장 저장</button>
+  <a class="btn" id="sheetLink" target="_blank" rel="noopener" title="리포트 구글 시트 열기">📝 작성하기</a>
+  <button id="reload" title="시트 다시 불러오기">🔄 불러오기</button>
+  <button class="primary" id="saveAll" title="카드 4장을 PNG로 저장">⬇️ 저장</button>
 </header>
 <div id="status">시트를 불러오는 중…</div>
 <div class="tip">인스타 피드용 4:5(1080×1350) 카드예요. 카드 속 글자는 클릭해서 바로 고칠 수 있어요 (저장 전 마지막 다듬기용 · 시트에는 반영되지 않음).</div>
@@ -134,8 +134,9 @@ function autoTheme(iso){ const d=(new Date(iso)-new Date(THEME_START))/864e5; co
 function themeIndex(iso){ const v=document.getElementById("theme").value; return v==="auto"||v===""?autoTheme(iso):+v; }
 function fillThemes(iso){
   const sel=document.getElementById("theme"); const keep=sel.value||"auto";
-  sel.innerHTML=`<option value="auto">색: 자동 (${THEMES[autoTheme(iso)].name})</option>`+THEMES.map((t,i)=>`<option value="${i}">색: ${t.name}</option>`).join("");
+  sel.innerHTML=`<option value="auto">🎨 배경</option>`+THEMES.map((t,i)=>`<option value="${i}">🎨 ${t.name}</option>`).join("");
   sel.value=keep;
+  sel.title=`배경 색 · 이번 주 자동: ${THEMES[autoTheme(iso)].name}`;
 }
 function applyTheme(iso){
   const t=THEMES[themeIndex(iso)];
