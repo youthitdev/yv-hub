@@ -10,7 +10,7 @@ const TABS = [
   { key: "weekly", label: "🍀 주간업무", Component: WeeklyTab },
   { key: "gantt", label: "📊 사업일정", Component: GanttTab },
   { key: "tracker", label: "📋 지원서현황", Component: TrackerTab },
-  { key: "card", label: "📸 카드뉴스", Component: WeeklyCardTab },
+  { key: "card", label: "📸 주간리포트", Component: WeeklyCardTab },
 ];
 
 const TAB_KEYS = TABS.map((t) => t.key);
