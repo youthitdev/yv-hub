@@ -2,6 +2,7 @@ import { useState, useEffect } from "react";
 import WeeklyTab from "./tabs/WeeklyTab.jsx";
 import GanttTab from "./tabs/GanttTab.jsx";
 import TrackerTab from "./tabs/TrackerTab.jsx";
+import WeeklyCardTab from "./WeeklyCardTab.jsx";
 
 const NAV_HEIGHT = 52;
 
@@ -9,6 +10,7 @@ const TABS = [
   { key: "weekly", label: "🍀 주간업무", Component: WeeklyTab },
   { key: "gantt", label: "📊 사업일정", Component: GanttTab },
   { key: "tracker", label: "📋 지원서현황", Component: TrackerTab },
+  { key: "card", label: "📸 카드뉴스", Component: WeeklyCardTab },
 ];
 
 const TAB_KEYS = TABS.map((t) => t.key);
