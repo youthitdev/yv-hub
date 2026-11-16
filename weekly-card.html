@@ -1,0 +1,285 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>유스보이스 주간 카드뉴스</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.min.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/html-to-image/1.11.11/html-to-image.min.js"></script>
+<style>
+
+:root{--navy:#1F3A5F;--blue:#2E6DA4;--green:#3C8D6E;--yellow:#FFD84D;--cream:#F6F1E7}
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:Pretendard,"Apple SD Gothic Neo",sans-serif;background:#f1f2f4;color:#222}
+header{padding:20px 24px;background:#fff;border-bottom:1px solid #e3e6ea;display:flex;flex-wrap:wrap;gap:12px;align-items:center}
+header h1{font-size:18px;color:var(--navy);margin-right:auto}
+select,button{font:inherit;font-size:14px;padding:8px 12px;border-radius:8px;border:1px solid #cfd5dd;background:#fff;cursor:pointer}
+button.primary{background:var(--navy);color:#fff;border-color:var(--navy);font-weight:700}
+#status{font-size:13px;color:#666;padding:10px 24px}
+#status.warn{color:#b3261e}
+.grid{display:flex;flex-wrap:wrap;gap:18px;padding:8px 24px 40px}
+.frame{width:324px;height:405px;overflow:hidden;border-radius:14px;box-shadow:0 2px 10px rgba(0,0,0,.08);position:relative}
+.frame .card{transform:scale(.3);transform-origin:top left}
+.frame button{position:absolute;bottom:8px;right:8px;font-size:11px;padding:4px 8px;opacity:.85}
+.tip{font-size:12px;color:#777;padding:0 24px 8px}
+.capbox{margin:0 24px 40px;background:#fff;border:1px solid #e3e6ea;border-radius:12px;padding:16px;max-width:760px}
+.capbox h2{font-size:15px;color:var(--navy);margin-bottom:8px;display:flex;align-items:center;gap:10px}
+.capbox textarea{width:100%;min-height:300px;font:inherit;font-size:14px;line-height:1.6;border:1px solid #d7dce3;border-radius:8px;padding:12px;resize:vertical}
+
+/* ===== 카드 (실제 크기 1080x1350 · 인스타 피드 4:5) ===== */
+.card{width:1080px;height:1350px;padding:84px 90px;display:flex;flex-direction:column;font-family:Pretendard,sans-serif;position:relative}
+.tag{font-size:34px;letter-spacing:.12em;font-weight:600;opacity:.75}
+.week{font-size:40px;margin-top:10px;opacity:.85}
+.title{word-break:keep-all;font-size:80px;line-height:1.28;font-weight:800;margin:46px 0 0}
+.huge{font-size:250px;font-weight:800;line-height:1;letter-spacing:-.02em}
+.unit{font-size:80px;font-weight:700;margin-left:12px}
+.chips{display:flex;flex-wrap:wrap;gap:18px;margin-top:44px}
+.chip{font-size:38px;padding:14px 30px;border-radius:60px;font-weight:600}
+[contenteditable]:focus{outline:4px dashed rgba(0,0,0,.25)}
+.card{background:var(--bg);color:var(--fg)}
+.chip{background:var(--chip);color:var(--chipfg)}
+.c1 .bigwrap{margin-top:auto;margin-bottom:auto}
+
+.c2 .cols{display:flex;gap:50px;margin-top:auto;margin-bottom:auto;border-top:4px solid var(--line);padding-top:56px}
+.c2 .block{flex:1;min-width:0}
+.c2 .label{font-size:44px;font-weight:700;color:var(--accent)}
+.c2 .num{font-size:170px;font-weight:800;line-height:1.05;margin-top:16px}
+.c2 .num small{font-size:60px;font-weight:700;margin-left:10px}
+
+.c3{justify-content:center}
+.c3 .mark{font-size:220px;line-height:.6;font-weight:800;height:120px}
+.c3 .quote{font-size:76px;line-height:1.5;font-weight:700;margin-top:40px;word-break:keep-all}
+.c3 .src{font-size:40px;margin-top:56px;opacity:.7}
+.c3 .tag{position:absolute;top:84px;left:90px}
+
+.c4 .count{margin-top:60px}
+.bar{height:46px;background:var(--track);border-radius:28px;margin:40px 0 22px;overflow:hidden}
+.bar div{height:100%;background:var(--accent);border-radius:28px}
+.c4 .sub{font-size:44px;color:var(--sub);line-height:1.6}
+.c4 .welcome{font-size:44px;margin-top:36px;line-height:1.5;color:var(--sub)}
+.cta{margin-top:auto;background:var(--accent);color:var(--ctafg);text-align:center;padding:40px;border-radius:100px;font-size:50px;font-weight:800}
+.brand{position:absolute;bottom:40px;right:90px;font-size:30px;opacity:.45;font-weight:700;letter-spacing:.06em}
+.c4 .brand{display:none}
+</style>
+</head>
+<body>
+<header>
+  <h1>유스보이스 주간 카드뉴스</h1>
+  <select id="week"></select>
+  <select id="theme" title="색 테마"></select>
+  <button id="reload">시트 다시 불러오기</button>
+  <button class="primary" id="saveAll">PNG 4장 저장</button>
+</header>
+<div id="status">시트를 불러오는 중…</div>
+<div class="tip">인스타 피드용 4:5(1080×1350) 카드예요. 카드 속 글자는 클릭해서 바로 고칠 수 있어요 (저장 전 마지막 다듬기용 · 시트에는 반영되지 않음).</div>
+<div class="grid" id="grid"></div>
+<div class="capbox"><h2>인스타 본문 <button id="copyCap">본문 복사</button><span id="capMsg" style="font-size:12px;color:#3C8D6E"></span></h2>
+<textarea id="caption"></textarea>
+<div class="tip" style="padding:6px 0 0">시트 숫자로 자동 작성돼요. 여기서 고쳐도 시트에는 반영되지 않아요.</div></div>
+
+<script>
+/* ===== 설정 ===== */
+const SHEET_ID = "1jMX_qDDiP5KPuei7hbN8bnnI2CiZrkav8pAkqnEWdrs";
+const TAB = "주간리포트";
+const RANGE = "A6:AB200";          // 6행부터 데이터
+const BIZ = ["한끗루틴","한끗독서","TMI","소모임","기타"];
+// 열 위치(0부터). 시트에서 열을 추가·이동하면 여기를 맞춰주세요.
+const COL = { date:0, week:1, owner:2, state:3,
+  youth:[4,5,6,7,8], youthSum:9,
+  post:[10,11], postSum:12,
+  meet:[13,14,15,16,17], meetSum:18,
+  quote:19, source:20,
+  donors:21, newDonors:22, remain:23, rate:24, ready:25 };
+const CTA = "프로필 링크에서 함께하기 →";
+
+/* ===== 주간 색 테마: 주마다 순서대로 돌아가요. 추가·수정 자유 ===== */
+// 카드별 값: bg 배경 · fg 글자 · accent 강조(라벨·막대·버튼) · chip 칩 배경 · chipfg 칩 글자 · line 구분선 · track 막대 바탕 · sub 보조 글자 · ctafg 버튼 글자
+const W="#ffffff";
+const THEMES=[
+ {name:"남색·노랑", cards:[
+  {bg:"#1F3A5F",fg:W,accent:W,chip:"rgba(255,255,255,.16)",chipfg:W},
+  {bg:"#F6F1E7",fg:"#1d2b22",accent:"#3C8D6E",chip:W,chipfg:"#333",line:"rgba(0,0,0,.12)"},
+  {bg:"#FFD84D",fg:"#1a1a1a"},
+  {bg:W,fg:"#1F3A5F",accent:"#1F3A5F",track:"#E3E8EF",sub:"#444",ctafg:W}]},
+ {name:"숲·살구", cards:[
+  {bg:"#2F5D50",fg:W,accent:W,chip:"rgba(255,255,255,.16)",chipfg:W},
+  {bg:"#EEF3EC",fg:"#1f2e28",accent:"#2F7A5F",chip:W,chipfg:"#333",line:"rgba(0,0,0,.12)"},
+  {bg:"#F6C9A6",fg:"#2a1a10"},
+  {bg:W,fg:"#2F5D50",accent:"#2F5D50",track:"#E2EBE6",sub:"#444",ctafg:W}]},
+ {name:"노을·먹색", cards:[
+  {bg:"#C4553F",fg:W,accent:W,chip:"rgba(255,255,255,.18)",chipfg:W},
+  {bg:"#FBEFE6",fg:"#3a2018",accent:"#B4472F",chip:W,chipfg:"#3a2018",line:"rgba(0,0,0,.12)"},
+  {bg:"#2B2B2B",fg:"#FDF6EE"},
+  {bg:W,fg:"#8E3B2C",accent:"#C4553F",track:"#F3E1DA",sub:"#444",ctafg:W}]},
+ {name:"보라·민트", cards:[
+  {bg:"#4B3B7A",fg:W,accent:W,chip:"rgba(255,255,255,.16)",chipfg:W},
+  {bg:"#F1EEF8",fg:"#2a2340",accent:"#6A55A8",chip:W,chipfg:"#2a2340",line:"rgba(0,0,0,.12)"},
+  {bg:"#B8E0D2",fg:"#16302a"},
+  {bg:W,fg:"#4B3B7A",accent:"#4B3B7A",track:"#E6E2F1",sub:"#444",ctafg:W}]},
+ {name:"하늘·분홍", cards:[
+  {bg:"#1E6A9E",fg:W,accent:W,chip:"rgba(255,255,255,.18)",chipfg:W},
+  {bg:"#EAF4FA",fg:"#12324a",accent:"#1E6A9E",chip:W,chipfg:"#12324a",line:"rgba(0,0,0,.12)"},
+  {bg:"#FFD6DC",fg:"#3a1a20"},
+  {bg:W,fg:"#1E6A9E",accent:"#1E6A9E",track:"#DDEAF3",sub:"#444",ctafg:W}]},
+ {name:"먹색·라임", cards:[
+  {bg:"#2B2B2B",fg:W,accent:W,chip:"rgba(255,255,255,.14)",chipfg:W},
+  {bg:"#F2F2EE",fg:"#222",accent:"#4A4A4A",chip:W,chipfg:"#222",line:"rgba(0,0,0,.12)"},
+  {bg:"#E4F06A",fg:"#1a1a1a"},
+  {bg:W,fg:"#2B2B2B",accent:"#2B2B2B",track:"#E6E6E6",sub:"#444",ctafg:W}]},
+];
+const THEME_START="2026-11-20"; // 이 날짜 주가 첫 번째 테마
+function autoTheme(iso){ const d=(new Date(iso)-new Date(THEME_START))/864e5; const n=THEMES.length; return ((Math.round(d/7)%n)+n)%n; }
+function themeIndex(iso){ const v=document.getElementById("theme").value; return v==="auto"||v===""?autoTheme(iso):+v; }
+function fillThemes(iso){
+  const sel=document.getElementById("theme"); const keep=sel.value||"auto";
+  sel.innerHTML=`<option value="auto">색: 자동 (${THEMES[autoTheme(iso)].name})</option>`+THEMES.map((t,i)=>`<option value="${i}">색: ${t.name}</option>`).join("");
+  sel.value=keep;
+}
+function applyTheme(iso){
+  const t=THEMES[themeIndex(iso)];
+  t.cards.forEach((v,i)=>{ const el=document.getElementById("card"+(i+1)); if(!el) return;
+    Object.entries(v).forEach(([k,val])=>el.style.setProperty("--"+k,val)); });
+}
+
+
+const num=v=>{ if(v==null) return null; const s=String(v).replace(/[,%\s]/g,""); if(s==="") return null; const n=Number(s); return isNaN(n)?null:n; };
+const fmt=n=>n==null?"-":n.toLocaleString("ko-KR");
+const esc=s=>String(s??"").replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+
+let DATA=[];
+function cellText(c){
+  if(!c) return "";
+  if(c.f!=null) return String(c.f);
+  if(c.v==null) return "";
+  const m=/^Date\((\d+),(\d+),(\d+)/.exec(c.v);
+  if(m) return `${m[1]}-${String(+m[2]+1).padStart(2,"0")}-${m[3].padStart(2,"0")}`;
+  return String(c.v);
+}
+function toISO(s){ // "2026-11-20", "2026. 11. 20", "2026/11/20" 모두 허용
+  const m=/(\d{4})\D+(\d{1,2})\D+(\d{1,2})/.exec(s||""); if(!m) return "";
+  return `${m[1]}-${m[2].padStart(2,"0")}-${m[3].padStart(2,"0")}`;
+}
+function load(){
+  const st=document.getElementById("status"); st.className=""; st.textContent="시트를 불러오는 중…";
+  const old=document.getElementById("gviz"); if(old) old.remove();
+  let done=false;
+  const fail=msg=>{ if(done) return; done=true; st.className="warn"; st.textContent=msg; };
+  window.__yvSheet=resp=>{
+    if(done) return; done=true;
+    if(!resp||resp.status==="error"){ st.className="warn";
+      st.textContent="시트를 읽지 못했어요: "+((resp&&resp.errors&&resp.errors[0]&&(resp.errors[0].detailed_message||resp.errors[0].message))||"알 수 없는 오류"); return; }
+    DATA=(resp.table.rows||[]).map(r=>(r.c||[]).map(cellText))
+      .map(r=>{ r[COL.date]=toISO(r[COL.date]); return r; })
+      .filter(r=>r[COL.date]);
+    if(!DATA.length){ fail("시트에서 날짜가 있는 줄을 찾지 못했어요. '주간리포트' 탭 이름과 6행부터 데이터가 있는지 확인해 주세요."); return; }
+    fillWeeks(); render();
+  };
+  const sc=document.createElement("script"); sc.id="gviz";
+  sc.src=`https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:json;responseHandler:__yvSheet&headers=0&sheet=${encodeURIComponent(TAB)}&range=${RANGE}&_=${Date.now()}`;
+  sc.onerror=()=>fail("시트에 연결하지 못했어요. 인터넷 연결과 시트 공유(링크가 있는 모든 사용자 – 뷰어)를 확인해 주세요. Claude 채팅 미리보기 안에서는 외부 연결이 막혀 있으니, 파일을 내려받아 브라우저(크롬 등)에서 열어주세요.");
+  setTimeout(()=>fail("시트 응답이 없어요. 시트 공유가 '링크가 있는 모든 사용자'인지 확인하고, 브라우저에서 직접 열어주세요."),12000);
+  document.head.appendChild(sc);
+}
+function fillWeeks(){
+  const sel=document.getElementById("week"); const keep=sel.value; sel.innerHTML="";
+  const today=new Date(); today.setHours(0,0,0,0);
+  let def=null;
+  DATA.forEach((r,i)=>{ const o=document.createElement("option"); o.value=i;
+    o.textContent=`${r[COL.date].slice(0,10)} · ${r[COL.week]} · ${r[COL.ready]||""}`; sel.appendChild(o);
+    if(def===null && new Date(r[COL.date].slice(0,10))>=today) def=i; });
+  sel.value= keep!=="" && keep!=null && sel.querySelector(`option[value="${keep}"]`) ? keep : (def??0);
+}
+
+/* ===== 카드 ===== */
+function chips(vals,labels){
+  return labels.map((b,i)=>vals[i]?`<span class="chip">${b} ${fmt(vals[i])}</span>`:"").join("");
+}
+function render(){
+  const r=DATA[document.getElementById("week").value]; if(!r) return;
+  const g=document.getElementById("grid"); const st=document.getElementById("status");
+  const youth=COL.youth.map(i=>num(r[i])), post=COL.post.map(i=>num(r[i])), meet=COL.meet.map(i=>num(r[i]));
+  const ySum=num(r[COL.youthSum]), pSum=num(r[COL.postSum]), mSum=num(r[COL.meetSum]);
+  const donors=num(r[COL.donors]), remain=num(r[COL.remain]), nd=num(r[COL.newDonors]);
+  const goal=(donors!=null&&remain!=null)?donors+remain:null;
+  const pct=goal?Math.min(100,donors/goal*100):0;
+  const wk=esc(r[COL.week]);
+  const missing=[]; if(ySum==null)missing.push("① 함께하는 청소년"); if(pSum==null&&mSum==null)missing.push("② 인증글·모임"); if(!r[COL.quote])missing.push("③ 한마디"); if(donors==null)missing.push("④ 후원자 수");
+  st.className=missing.length?"warn":""; st.textContent=missing.length?`아직 비어 있는 칸: ${missing.join(", ")}`:`${r[COL.date].slice(0,10)} 리포트 준비 완료 · 마지막 확인 후 저장하세요.`;
+
+  const cards=[
+`<div class="card c1" id="card1">
+  <div class="tag">YOUTHVOICE WEEKLY</div><div class="week">${wk}</div>
+  <div class="title" contenteditable>이번 주,<br>유스보이스와<br>함께한 청소년</div>
+  <div class="bigwrap"><span class="huge">${fmt(ySum)}</span><span class="unit">명</span>
+  <div class="chips">${chips(youth,BIZ)}</div></div>
+  <div class="brand">YOUTHVOICE</div>
+</div>`,
+`<div class="card c2" id="card2">
+  <div class="tag">MOMENTS</div><div class="week">${wk}</div>
+  <div class="title" contenteditable>이번 주,<br>일상을 나눈 순간들</div>
+  <div class="cols">
+  <div class="block"><div class="label">하루 인증글</div>
+    <div class="num">${fmt(pSum)}<small>개</small></div><div class="chips" style="margin-top:24px">${chips(post,["한끗루틴","한끗독서"])}</div></div>
+  <div class="block"><div class="label">함께 모인 시간</div>
+    <div class="num">${fmt(mSum)}<small>번</small></div><div class="chips" style="margin-top:24px">${chips(meet,BIZ)}</div></div></div>
+  <div class="brand">YOUTHVOICE</div>
+</div>`,
+`<div class="card c3" id="card3">
+  <div class="tag">VOICE · ${wk}</div>
+  <div class="mark">“</div>
+  <div class="quote" contenteditable>${esc(r[COL.quote]||"(이번 주 한마디를 시트에 입력해 주세요)").replace(/\n/g,"<br>")}</div>
+  <div class="src" contenteditable>— ${esc(r[COL.source]||"")} 청소년</div>
+  <div class="brand">YOUTHVOICE</div>
+</div>`,
+`<div class="card c4" id="card4">
+  <div class="tag">WITH YOU</div><div class="week">${wk}</div>
+  <div class="title" contenteditable>유스보이스를<br>정기후원하는 사람들</div>
+  <div class="count"><span class="huge" style="font-size:220px">${fmt(donors)}</span><span class="unit">명</span></div>
+  <div class="bar"><div style="width:${pct.toFixed(1)}%"></div></div>
+  <div class="sub">${goal?`목표 ${fmt(goal)}명까지 <b>${fmt(remain)}명</b> 남았어요`:""}</div>
+  ${nd&&nd>0?`<div class="welcome" contenteditable>이번 주 새로 함께한 ${fmt(nd)}분,<br>환영합니다.</div>`:""}
+  <div class="cta" contenteditable>${CTA}</div>
+  <div class="brand">YOUTHVOICE</div>
+</div>`];
+  g.innerHTML=cards.map((c,i)=>`<div class="frame">${c}<button data-i="${i+1}">이 장 저장</button></div>`).join("");
+  g.querySelectorAll("button[data-i]").forEach(b=>b.onclick=()=>save(+b.dataset.i));
+  fillThemes(r[COL.date]); applyTheme(r[COL.date]);
+  document.getElementById("caption").value=buildCaption(r);
+}
+
+
+/* ===== 인스타 본문 ===== */
+const HASHTAGS="#유스보이스 #유스잇 #학교밖청소년 #청소년 #한끗루틴 #정기후원 #비영리";
+function buildCaption(r){
+  const v=i=>num(r[i]);
+  const y=v(COL.youthSum), p=v(COL.postSum), m=v(COL.meetSum), d=v(COL.donors), nd=v(COL.newDonors), rem=v(COL.remain);
+  const L=[`[유스보이스 위클리 · ${r[COL.week]}]`,""];
+  if(y!=null) L.push(`이번 주, 유스보이스와 함께한 청소년은 ${fmt(y)}명이에요.`);
+  const mid=[]; if(p) mid.push(`서로의 하루를 인증한 글 ${fmt(p)}개`); if(m) mid.push(`함께 모인 시간 ${fmt(m)}번`);
+  if(mid.length) L.push(mid.join(", ")+".");
+  if(r[COL.quote]){ L.push("",`“${r[COL.quote]}”`,`— ${r[COL.source]||""} 청소년`.replace("—  청소년","— 청소년")); }
+  L.push("");
+  if(d!=null) L.push(`지금 ${fmt(d)}명의 정기후원자가 이 일을 함께하고 있어요.`+(nd>0?` 이번 주 새로 함께한 ${fmt(nd)}분, 환영합니다.`:""));
+  if(rem) L.push(`목표까지 ${fmt(rem)}명, 한 분 한 분이 큰 힘이 돼요.`);
+  L.push("청소년들이 오늘의 일상을 내일로 이어갈 수 있도록,","프로필 링크에서 정기후원으로 함께해 주세요.","",HASHTAGS);
+  return L.join("\n");
+}
+document.getElementById("copyCap").onclick=async()=>{
+  const t=document.getElementById("caption"); try{ await navigator.clipboard.writeText(t.value); }catch(e){ t.select(); document.execCommand("copy"); }
+  const m=document.getElementById("capMsg"); m.textContent="복사했어요"; setTimeout(()=>m.textContent="",1500);
+};
+
+/* ===== 저장 ===== */
+async function save(i){
+  const el=document.getElementById("card"+i); const r=DATA[document.getElementById("week").value];
+  const png=await htmlToImage.toPng(el,{width:1080,height:1350,pixelRatio:1,style:{transform:"none"}});
+  const a=document.createElement("a"); a.href=png; a.download=`유스보이스_${r[COL.date].slice(0,10)}_${i}.png`; a.click();
+}
+document.getElementById("saveAll").onclick=async()=>{ for(let i=1;i<=4;i++){ await save(i); await new Promise(r=>setTimeout(r,400)); } };
+document.getElementById("week").onchange=()=>{document.getElementById("theme").value="auto";render();};
+document.getElementById("theme").onchange=()=>applyTheme(DATA[document.getElementById("week").value][COL.date]);
+document.getElementById("reload").onclick=load;
+load();
+</script>
+</body>
+</html>
