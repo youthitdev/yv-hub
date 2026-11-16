@@ -13,7 +13,8 @@
 body{font-family:Pretendard,"Apple SD Gothic Neo",sans-serif;background:#f1f2f4;color:#222}
 header{padding:20px 24px;background:#fff;border-bottom:1px solid #e3e6ea;display:flex;flex-wrap:wrap;gap:12px;align-items:center}
 header h1{font-size:18px;color:var(--navy);margin-right:auto}
-select,button{font:inherit;font-size:14px;padding:8px 12px;border-radius:8px;border:1px solid #cfd5dd;background:#fff;cursor:pointer}
+select,button,a.btn{font:inherit;font-size:14px;padding:8px 12px;border-radius:8px;border:1px solid #cfd5dd;background:#fff;cursor:pointer}
+a.btn{display:inline-block;text-decoration:none;color:#1d6f42;border-color:#1d6f42;font-weight:700}
 button.primary{background:var(--navy);color:#fff;border-color:var(--navy);font-weight:700}
 #status{font-size:13px;color:#666;padding:10px 24px}
 #status.warn{color:#b3261e}
@@ -67,6 +68,7 @@ button.primary{background:var(--navy);color:#fff;border-color:var(--navy);font-w
   <h1>유스보이스 주간 카드뉴스</h1>
   <select id="week"></select>
   <select id="theme" title="색 테마"></select>
+  <a class="btn" id="sheetLink" target="_blank" rel="noopener">📝 리포트 시트 열기</a>
   <button id="reload">시트 다시 불러오기</button>
   <button class="primary" id="saveAll">PNG 4장 저장</button>
 </header>
@@ -146,6 +148,7 @@ const num=v=>{ if(v==null) return null; const s=String(v).replace(/[,%\s]/g,"");
 const fmt=n=>n==null?"-":n.toLocaleString("ko-KR");
 const esc=s=>String(s??"").replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
 
+document.getElementById("sheetLink").href=`https://docs.google.com/spreadsheets/d/${SHEET_ID}/edit`;
 let DATA=[];
 function cellText(c){
   if(!c) return "";
